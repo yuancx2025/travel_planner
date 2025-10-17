@@ -1,0 +1,7 @@
+langgraph>=0.2
+langchain-core
+typing_extensions
+pydantic
+httpx>=0.27
+streamlit>=1.36
+watchfiles>=0.21
