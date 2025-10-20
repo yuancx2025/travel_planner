@@ -1,13 +1,28 @@
 # tools/fuel_price.py
 import os
 import httpx
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict
 
 API_TOKEN = os.environ.get("COLLECTAPI_TOKEN")
 BASE_URL = "https://api.collectapi.com/gasPrice"
 
 class FuelPriceError(Exception):
     pass
+
+def _coerce_numeric(value: Any) -> Any:
+    """Attempt to convert CollectAPI stringified prices to floats."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = re.sub(r"[^0-9.]+", "", value)
+        if cleaned:
+            try:
+                return float(cleaned)
+            except ValueError:
+                return value
+    return value
+
 
 def get_state_gas_prices(state_code: str) -> Dict[str, Any]:
     """
@@ -46,7 +61,10 @@ def get_state_gas_prices(state_code: str) -> Dict[str, Any]:
     if result is None:
         raise FuelPriceError(f"API did not return result field: {data}")
 
-    # return the result directly, or you could normalize further
+    if isinstance(result, dict):
+        return {k: _coerce_numeric(v) for k, v in result.items()}
+    if isinstance(result, list):
+        return [{k: _coerce_numeric(v) for k, v in item.items()} for item in result]
     return result
 
 if __name__ == "__main__":

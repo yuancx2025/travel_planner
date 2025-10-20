@@ -1,6 +1,4 @@
 # tests/conftest.py
-import os
-import json
 import types
 import pytest
 
@@ -37,7 +35,25 @@ def fake_aviationstack(monkeypatch):
         ]
     }
 
+    price_sample = {
+        "success": True,
+        "currency": "usd",
+        "data": [
+            {
+                "value": 189.50,
+                "airline": "American Airlines",
+                "depart_date": "2025-11-20",
+                "return_date": "2025-11-27",
+            }
+        ],
+    }
+
+    monkeypatch.setenv("AVIATIONSTACK_KEY", "test-key")
+    monkeypatch.setenv("TRAVELPAYOUTS_TOKEN", "tp-test-token")
+
     def _fake_request(method, url, **kw):
+        if "travelpayouts" in url:
+            return FakeResponse(price_sample, 200)
         return FakeResponse(sample, 200)
 
     monkeypatch.setattr(flight, "_request", _fake_request)
