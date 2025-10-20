@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os, time, random
 import httpx
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 BK_AFFILIATE_ID = os.environ.get("BK_DEMAND_AFFILIATE_ID")
 BK_TOKEN = os.environ.get("BK_DEMAND_TOKEN")
@@ -41,7 +41,7 @@ def search_hotels(
     auth = (BK_AFFILIATE_ID, BK_TOKEN)  # Auth per Demand guide. :contentReference[oaicite:5]{index=5}
 
     # The exact schema varies by product; this payload follows Booking's "accommodations search" pattern.
-    payload: Dict[str, Any] = {
+    legacy_payload = {
         "method": "accommodations.search",
         "params": {
             "query": query,
@@ -49,11 +49,36 @@ def search_hotels(
             "checkout": checkout,
             "guests": guests,
             "rooms": rooms,
-            "limit": limit
-        }
+            "limit": limit,
+        },
+    }
+    modern_payload = {
+        "query": query,
+        "checkin": checkin,
+        "checkout": checkout,
+        "guests": guests,
+        "rooms": rooms,
+        "limit": limit,
     }
 
-    r = _request("POST", f"{BASE}/accommodations", json=payload, auth=auth, headers=headers)
+    request_options = [
+        (f"{BASE}/accommodations/search", modern_payload),
+        (f"{BASE}/accommodations", legacy_payload),
+    ]
+    last_err = None
+    for idx, (url, body) in enumerate(request_options):
+        try:
+            r = _request("POST", url, json=body, auth=auth, headers=headers)
+            break
+        except httpx.HTTPStatusError as exc:
+            last_err = exc
+            status = getattr(exc.response, "status_code", None)
+            if idx < len(request_options) - 1 and status in {400, 404, 422}:
+                continue
+            raise
+    else:
+        raise last_err  # type: ignore[misc]
+
     js = r.json()
     out: List[Dict[str, Any]] = []
     for h in js.get("result", []):

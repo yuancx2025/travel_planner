@@ -10,5 +10,8 @@ def test_flight_search_normalization(fake_aviationstack):
     for k in ["id", "source", "airline", "flight_number", "dep_airport", "arr_airport", "status", "raw"]:
         assert k in f0
     assert f0["source"] == "aviationstack"
-    # Note: Aviationstack does NOT provide price; ensure we do NOT invent one
-    assert "price" not in f0
+    assert "price" in f0
+    price = f0["price"]
+    assert price["currency"] == "USD"
+    assert price["amount"] > 0
+    assert price["per"] == "ticket"

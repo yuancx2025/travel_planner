@@ -43,17 +43,42 @@ def search_car_rentals(
     headers = {"Content-Type": "application/json"}
     auth = (BK_AFFILIATE_ID, BK_TOKEN)
 
-    payload: Dict[str, Any] = {
+    legacy_payload: Dict[str, Any] = {
         "method": "cars.search",
         "params": {
             "pickup": {"airport": pickup_airport_iata},
             "dropoff": {"airport": dropoff_airport_iata or pickup_airport_iata},
             "start": start_iso,
             "end": end_iso,
-            "limit": limit
-        }
+            "limit": limit,
+        },
     }
-    r = _request("POST", f"{BASE}/cars", json=payload, auth=auth, headers=headers)
+    modern_payload: Dict[str, Any] = {
+        "pickup": {"airport": pickup_airport_iata},
+        "dropoff": {"airport": dropoff_airport_iata or pickup_airport_iata},
+        "start": start_iso,
+        "end": end_iso,
+        "limit": limit,
+    }
+
+    request_options = [
+        (f"{BASE}/cars/search", modern_payload),
+        (f"{BASE}/cars", legacy_payload),
+    ]
+    last_err = None
+    for idx, (url, body) in enumerate(request_options):
+        try:
+            r = _request("POST", url, json=body, auth=auth, headers=headers)
+            break
+        except httpx.HTTPStatusError as exc:
+            last_err = exc
+            status = getattr(exc.response, "status_code", None)
+            if idx < len(request_options) - 1 and status in {400, 404, 422}:
+                continue
+            raise
+    else:
+        raise last_err  # type: ignore[misc]
+
     js = r.json()
     out: List[Dict[str, Any]] = []
     for o in js.get("result", []):
