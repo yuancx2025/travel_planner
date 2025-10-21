@@ -66,17 +66,3 @@ def get_state_gas_prices(state_code: str) -> Dict[str, Any]:
     if isinstance(result, list):
         return [{k: _coerce_numeric(v) for k, v in item.items()} for item in result]
     return result
-
-if __name__ == "__main__":
-    # simple test
-    import sys
-    if len(sys.argv) != 2:
-        print("Usage: python fuel_price.py <STATE_CODE>")
-        sys.exit(1)
-    state = sys.argv[1]
-    try:
-        prices = get_state_gas_prices(state)
-        print(f"Gas prices for {state}: {prices}")
-    except FuelPriceError as e:
-        print(f"Error: {e}")
-        sys.exit(2)
