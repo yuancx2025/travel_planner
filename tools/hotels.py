@@ -1,104 +1,59 @@
-# tools/hotels.py
-from __future__ import annotations
-import os, time, random
-import httpx
-from typing import Any, Dict, List
+# hotels.py
+import os
+from amadeus import Client, ResponseError
+from dotenv import load_dotenv
 
-BK_AFFILIATE_ID = os.environ.get("BK_DEMAND_AFFILIATE_ID")
-BK_TOKEN = os.environ.get("BK_DEMAND_TOKEN")
-BASE = "https://demandapi.booking.com/3.1"
+# Load .env with your credentials
+dotenv_path = os.path.join(os.path.dirname(__file__), "../.env")
+load_dotenv(dotenv_path)
 
-def _request(method: str, url: str, **kw) -> httpx.Response:
-    retries, backoff = 3, 0.7
-    last_err = None
-    for i in range(retries):
-        try:
-            with httpx.Client(timeout=kw.pop("timeout", 30)) as c:
-                r = c.request(method, url, **kw)
-                if r.status_code in (429, 500, 502, 503, 504):
-                    raise httpx.HTTPStatusError("retryable", request=r.request, response=r)
-                r.raise_for_status()
-                return r
-        except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            last_err = e
-            if i < retries - 1:
-                time.sleep(backoff * (2**i) + random.random()*0.3)
-            else:
-                raise
-    raise last_err  # type: ignore
+# Initialize the Amadeus client
+amadeus = Client(
+    client_id=os.getenv("AMADEUS_API_KEY"),
+    client_secret=os.getenv("AMADEUS_API_SECRET"),
+)
 
-def search_hotels(
-    query: str, checkin: str, checkout: str, guests: int = 2, rooms: int = 1, limit: int = 20
-) -> List[Dict[str, Any]]:
-    """
-    Provider: Booking.com Demand API (Accommodations collection).
-    Returns normalized hotels with price when available.
-    Environment: BK_DEMAND_AFFILIATE_ID, BK_DEMAND_TOKEN
-    Notes: You must be a Managed Affiliate; calls are POST+JSON. :contentReference[oaicite:4]{index=4}
-    """
-    assert BK_AFFILIATE_ID and BK_TOKEN, "Missing BK_DEMAND_AFFILIATE_ID or BK_DEMAND_TOKEN"
-    headers = {"Content-Type": "application/json"}
-    auth = (BK_AFFILIATE_ID, BK_TOKEN)  # Auth per Demand guide. :contentReference[oaicite:5]{index=5}
 
-    # The exact schema varies by product; this payload follows Booking's "accommodations search" pattern.
-    legacy_payload = {
-        "method": "accommodations.search",
-        "params": {
-            "query": query,
-            "checkin": checkin,
-            "checkout": checkout,
-            "guests": guests,
-            "rooms": rooms,
-            "limit": limit,
-        },
-    }
-    modern_payload = {
-        "query": query,
-        "checkin": checkin,
-        "checkout": checkout,
-        "guests": guests,
-        "rooms": rooms,
-        "limit": limit,
-    }
+def search_hotels_by_city(city_code, check_in, check_out):
+    try:
+        # 1️⃣ Get hotel IDs for the city
+        hotel_list = amadeus.reference_data.locations.hotels.by_city.get(
+            cityCode=city_code
+        )
+        hotel_ids = [h["hotelId"] for h in hotel_list.data[:1]]  # take first 1 hotel for testing
 
-    request_options = [
-        (f"{BASE}/accommodations/search", modern_payload),
-        (f"{BASE}/accommodations", legacy_payload),
-    ]
-    last_err = None
-    for idx, (url, body) in enumerate(request_options):
-        try:
-            r = _request("POST", url, json=body, auth=auth, headers=headers)
-            break
-        except httpx.HTTPStatusError as exc:
-            last_err = exc
-            status = getattr(exc.response, "status_code", None)
-            if idx < len(request_options) - 1 and status in {400, 404, 422}:
-                continue
-            raise
-    else:
-        raise last_err  # type: ignore[misc]
+        if not hotel_ids:
+            print("No hotels found for this city.")
+            return []
 
-    js = r.json()
-    out: List[Dict[str, Any]] = []
-    for h in js.get("result", []):
-        out.append({
-            "id": str(h.get("hotel_id") or h.get("id")),
-            "source": "booking",
-            "name": h.get("name"),
-            "address": h.get("address"),
-            "city": h.get("city"),
-            "country": h.get("country"),
-            "stars": h.get("class"),
-            "rating": h.get("review_score"),
-            "review_count": h.get("review_nr"),
-            "price": {
-                "currency": h.get("currency", "USD"),
-                "amount": h.get("price"),
-                "min_amount": h.get("min_total_price"),
-                "max_amount": h.get("max_total_price"),
-            },
-            "url": h.get("url"),
-            "raw": h,
-        })
-    return out
+        # 2️⃣ Get offers for those hotels
+        response = amadeus.shopping.hotel_offers_search.get(
+            hotelIds=",".join(hotel_ids),
+            checkInDate=check_in,
+            checkOutDate=check_out,
+            adults=2,
+            roomQuantity=1,
+            currency="USD",
+        )
+
+        results = []
+        for offer in response.data:
+            hotel = offer.get("hotel", {})
+            price = offer.get("offers", [{}])[0].get("price", {})
+            results.append(
+                {
+                    "name": hotel.get("name"),
+                    "address": hotel.get("address", {}).get("lines", ["N/A"])[0],
+                    "price": price.get("total"),
+                    "currency": price.get("currency"),
+                    "rating": hotel.get("rating"),
+                }
+            )
+
+        return results
+
+    except ResponseError as error:
+        print("❌ Amadeus API error:", error)
+        if hasattr(error, "response") and error.response:
+            print("Details:", error.response.body)
+        return []

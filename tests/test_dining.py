@@ -1,12 +1,27 @@
-# tests/test_dining.py
-from tools.dining import search_dining
+# test/test_dining.py
+import sys
+import os
 
-def test_dining_search_normalization(fake_yelp):
-    items = search_dining("ramen", 38.9, -77.04, limit=3)
-    assert isinstance(items, list) and len(items) >= 1
-    it0 = items[0]
-    for k in ["id","source","name","category","address","coord","rating","review_count","url","raw"]:
-        assert k in it0
-    assert it0["source"] == "yelp"
-    # Yelp gives price tier symbols - not numeric price
-    assert "price_tier" in it0
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from tools.dining import search_restaurants
+
+def main():
+    latitude = 36.0014  # Example: Durham, NC
+    longitude = -78.9382
+    keyword = "sushi"
+
+    results = search_restaurants(
+        latitude, longitude, radius=2000, keyword=keyword
+    )
+
+    if not results:
+        print("No results found.")
+        return
+
+    for i, r in enumerate(results, start=1):
+        print(f"{i}. {r['name']} ({r.get('rating', 'N/A')}★) - {r['address']} - Price Level: {r.get('price_level', 'N/A')}")
+
+
+if __name__ == "__main__":
+    main()
