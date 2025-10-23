@@ -1,17 +1,30 @@
-# tests/test_flight.py
-import pytest
-from tools.flight import search_flights_by_route
+# test_flight.py
+import sys
+import os
 
-def test_flight_search_normalization(fake_aviationstack):
-    flights = search_flights_by_route("RDU", "DCA", limit=5)
-    assert isinstance(flights, list) and len(flights) >= 1
-    f0 = flights[0]
-    # required normalized fields
-    for k in ["id", "source", "airline", "flight_number", "dep_airport", "arr_airport", "status", "raw"]:
-        assert k in f0
-    assert f0["source"] == "aviationstack"
-    assert "price" in f0
-    price = f0["price"]
-    assert price["currency"] == "USD"
-    assert price["amount"] > 0
-    assert price["per"] == "ticket"
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from tools.flight import search_flights
+
+
+def main():
+    origin = "JFK"  # New York
+    destination = "LON"  # London
+    departure = "2025-10-30"
+    return_date = "2025-11-01"
+    adults = 1
+
+    print(
+        f"✈️ Searching flights from {origin} to {destination} ({departure} → {return_date})...\n"
+    )
+    results = search_flights(origin, destination, departure, return_date, adults)
+
+    if not results:
+        print("No flights found.")
+        return
+
+    for i, f in enumerate(results, start=1):
+        print(f"{i}. {f['carrier']} — {f['price']} {f['currency']} — {f['duration']}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,59 +1,57 @@
 # tools/dining.py
-from __future__ import annotations
-import os, time, random
-import httpx
-from typing import Any, Dict, List
+import os
+import requests
+from dotenv import load_dotenv
 
-YELP_API_KEY = os.environ.get("YELP_API_KEY")
-BASE = "https://api.yelp.com/v3"
+dotenv_path = os.path.join(os.path.dirname(__file__), "../.env")
+load_dotenv(dotenv_path)
 
-def _request(method: str, url: str, **kw) -> httpx.Response:
-    retries, backoff = 3, 0.6
-    last_err = None
-    for i in range(retries):
-        try:
-            with httpx.Client(timeout=kw.pop("timeout", 20)) as c:
-                r = c.request(method, url, **kw)
-                if r.status_code in (429, 500, 502, 503, 504):
-                    raise httpx.HTTPStatusError("retryable", request=r.request, response=r)
-                r.raise_for_status()
-                return r
-        except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            last_err = e
-            if i < retries - 1:
-                time.sleep(backoff * (2**i) + random.random()*0.2)
-            else:
-                raise
-    raise last_err  # type: ignore
-
-def search_dining(term: str, lat: float, lng: float, radius_m: int = 3000, limit: int = 20) -> List[Dict[str, Any]]:
+def search_restaurants(latitude, longitude, radius=1500, keyword=None):
     """
-    Provider: Yelp Fusion Business Search.
-    Returns normalized restaurant POIs.
-    Environment: YELP_API_KEY
+    Search for restaurants near a given location using Google Maps Places API.
+
+    Parameters:
+        api_key (str): Your Google Maps API key
+        latitude (float): Latitude of the search location
+        longitude (float): Longitude of the search location
+        radius (int): Search radius in meters (default 1500)
+        keyword (str): Optional keyword to refine search (e.g., 'sushi', 'vegan')
+
+    Returns:
+        list: A list of restaurant dictionaries with name, rating, address, and coordinates
     """
-    assert YELP_API_KEY, "Missing YELP_API_KEY"
-    headers = {"Authorization": f"Bearer {YELP_API_KEY}"}
-    params = {"term": term, "latitude": lat, "longitude": lng, "radius": radius_m, "limit": limit}
-    r = _request("GET", f"{BASE}/businesses/search", headers=headers, params=params)
-    js = r.json()
-    out: List[Dict[str, Any]] = []
-    for b in js.get("businesses", []):
-        coords = b.get("coordinates") or {}
-        loc = b.get("location") or {}
-        out.append({
-            "id": b.get("id"),
-            "source": "yelp",
-            "name": b.get("name"),
-            "category": "restaurant",
-            "address": ", ".join([x for x in [loc.get("address1"), loc.get("city"), loc.get("state"), loc.get("zip_code")] if x]),
-            "coord": {"lat": coords.get("latitude"), "lng": coords.get("longitude")},
-            "rating": b.get("rating"),
-            "review_count": b.get("review_count"),
-            "phone": b.get("display_phone"),
-            "url": b.get("url"),
-            "price_tier": b.get("price"),  # $, $$, ...
-            "is_closed": b.get("is_closed"),
-            "raw": b,
-        })
-    return out
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        raise ValueError("Missing environment variable: GOOGLE_MAPS_API_KEY")
+    url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+    params = {
+        "location": f"{latitude},{longitude}",
+        "radius": radius,
+        "type": "restaurant",
+        "key": api_key,
+    }
+
+    if keyword:
+        params["keyword"] = keyword
+
+    response = requests.get(url, params=params)
+    data = response.json()
+
+    if data.get("status") != "OK":
+        print(f"Error: {data.get('status')}, {data.get('error_message', '')}")
+        return []
+
+    restaurants = []
+    for place in data["results"]:
+        restaurants.append(
+            {
+                "name": place.get("name"),
+                "rating": place.get("rating"),
+                "address": place.get("vicinity"),
+                "lat": place["geometry"]["location"]["lat"],
+                "lng": place["geometry"]["location"]["lng"],
+                "price_level": place.get("price_level"),
+            }
+        )
+
+    return restaurants

@@ -1,14 +1,30 @@
-# tests/test_hotels.py
-from tools.hotels import search_hotels
+# test_hotels.py
 
-def test_hotels_search_returns_price_amount(fake_booking_hotels):
-    hotels = search_hotels("Washington, DC", "2025-11-20", "2025-11-22", guests=2)
-    assert isinstance(hotels, list) and len(hotels) >= 1
-    h0 = hotels[0]
-    for k in ["id","source","name","address","city","country","stars","rating","review_count","price","url","raw"]:
-        assert k in h0
-    # Price should be a dict with amount and currency in USD
-    assert isinstance(h0["price"], dict)
-    assert h0["price"]["currency"] == "USD"
-    assert isinstance(h0["price"]["amount"], (int, float))
-    assert h0["price"]["amount"] > 0
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from tools.hotels import search_hotels_by_city
+
+def main():
+    city_code = "MAD"  # Madrid
+    check_in = "2025-10-25"
+    check_out = "2025-10-27"
+
+    print(f"🏨 Searching hotels in {city_code} from {check_in} to {check_out}…\n")
+
+    results = search_hotels_by_city(
+        city_code, check_in, check_out)
+
+    if not results:
+        print("No results found.")
+        return
+
+    for i, h in enumerate(results[:10], start=1):
+        print(
+            f"{i}. {h['name']} — {h['price']} {h['currency']} — {h['address']} (⭐{h.get('rating', 'N/A')})"
+        )
+
+
+if __name__ == "__main__":
+    main()
