@@ -5,6 +5,9 @@ from typing import Generator, Dict, Any, List, Optional
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+if not os.getenv("GOOGLE_API_KEY"):
+    raise EnvironmentError("Missing GOOGLE_API_KEY. Run: export GOOGLE_API_KEY='your_key_here'")
+
 class ChatAgent:
     """
     A focused, front-end-friendly chatter agent that:
@@ -243,3 +246,90 @@ Current known state (may be partial, use it to stay consistent but do NOT halluc
             )
 
         return SystemMessage(content=text)
+
+if __name__ == "__main__":
+    """
+    Terminal REPL for ChatAgent.
+    Commands:
+      /state      -> print current state JSON
+      /missing    -> print missing required fields
+      /reset      -> clear state and conversation
+      /save PATH  -> save state to a file (JSON)
+      /load PATH  -> load state from a file (JSON)
+      /help       -> show commands
+      /quit       -> exit
+    """
+    import sys, json, pathlib
+
+    # 1) init the agent (uses your default gemini model)
+    agent = ChatAgent()
+    state: Dict[str, Any] = {}
+
+    print("🔹 ChatAgent REPL (Gemini). Type /help for commands. Ctrl+C to exit.")
+    while True:
+        try:
+            user = input("\nYou: ").strip()
+
+            # --- commands ---
+            if not user:
+                continue
+            if user == "/quit":
+                print("Bye! 👋")
+                sys.exit(0)
+            if user == "/help":
+                print(
+                    "Commands:\n"
+                    "  /state         show current state\n"
+                    "  /missing       show missing required fields\n"
+                    "  /reset         clear state & conversation\n"
+                    "  /save PATH     save state to PATH (json)\n"
+                    "  /load PATH     load state from PATH (json)\n"
+                    "  /quit          exit"
+                )
+                continue
+            if user == "/state":
+                print(json.dumps(state, indent=2, ensure_ascii=False))
+                continue
+            if user == "/missing":
+                missing = [f for f in agent.required_fields if not state.get(f)]
+                print("Missing:", ", ".join(missing) if missing else "(none)")
+                continue
+            if user == "/reset":
+                state = {}
+                agent.conversation_history.clear()
+                print("Reset OK.")
+                continue
+            if user.startswith("/save "):
+                path = pathlib.Path(user.split(" ", 1)[1].strip())
+                path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+                print(f"Saved -> {path}")
+                continue
+            if user.startswith("/load "):
+                path = pathlib.Path(user.split(" ", 1)[1].strip())
+                state = json.loads(path.read_text())
+                print(f"Loaded <- {path}")
+                continue
+
+            # 2) normal chat turn -> collect info
+            out = agent.collect_info(user, state=state)
+            state = out["state"]  # update local state
+
+            # 3) stream assistant reply
+            stream = out["stream"]
+            print("Assistant:", end=" ", flush=True)
+            if stream is not None:
+                for chunk in stream:
+                    # langchain streaming returns message chunks with `.content`
+                    piece = getattr(chunk, "content", None)
+                    if piece:
+                        print(piece, end="", flush=True)
+            print()  # newline
+
+            # 4) show completion hint
+            if out["complete"]:
+                print("✅ All required fields collected. Type /state to review or /reset to start over.")
+
+        except KeyboardInterrupt:
+            print("\nInterrupted. Type /quit to exit.")
+        except Exception as e:
+            print(f"\n[error] {e}")
