@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from typing import Generator, Dict, Any, List, Optional
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -146,28 +147,30 @@ class ChatAgent:
         No regexes or hard-coded parsing — model-only extraction to JSON.
         """
         system_prompt = f"""
-Extract the user's travel details and return a SINGLE JSON object with these keys:
-{', '.join([f'"{f}"' for f in self.all_fields])}
+        Extract the user's travel details and return a SINGLE JSON object with these keys:
+        {', '.join([f'"{f}"' for f in self.all_fields])}
 
-Rules:
-- If a field isn't mentioned, set it to "" (empty string).
-- name: string (first name is fine).
-- destination_city: city name string.
-- travel_days: integer if clear; else "".
-- start_date: if provided, format YYYY-MM-DD; if unclear/unknown/not provided, set to "not decided".
-- budget_usd: numeric (strip $ and commas). If unclear, "".
-- num_people: integer if clear; else "".
-- kids: "yes" | "no" | integer count | "". If user says "no kids" or "all adults", set "no".
-- activity_pref: "outdoor" | "indoor" | "" (pick the dominant preference if clearly stated).
-- need_car_rental: "yes" | "no" | "" (keep as string for downstream UI).
-- hotel_room_pref: short text like "1 king", "2 queens", "suite" if explicitly mentioned; else "".
-- cuisine_pref: short text (e.g., "ramen", "vegan", "seafood", "kid-friendly") if mentioned; else "".
-- origin_city, home_airport are optional; fill only if clearly present; otherwise "".
-- specific_requirements: any accessibility needs, dietary restrictions, constraints, or special requests; else "".
+        Rules:
+        - If a field isn't mentioned, set it to "" (empty string).
+        - name: string (first name is fine).
+        - destination_city: city name string.
+        - travel_days: integer if clear; else "".
+        - start_date: if provided, format YYYY-MM-DD; if unclear/unknown/not provided, set to "not decided".
+        - budget_usd: numeric (strip $ and commas). If unclear, "".
+        - num_people: integer if clear; else "".
+        - kids: "yes" | "no" | integer count | "". If user says "no kids" or "all adults", set "no".
+        - activity_pref: "outdoor" | "indoor" | "" (pick the dominant preference if clearly stated).
+        - need_car_rental: "yes" | "no" | "" (keep as string for downstream UI).
+        - hotel_room_pref: short text like "1 king", "2 queens", "suite" if explicitly mentioned; else "".
+        - cuisine_pref: short text (e.g., "ramen", "vegan", "seafood", "kid-friendly") if mentioned; else "".
+        - origin_city, home_airport are optional; fill only if clearly present; otherwise "".
+        - specific_requirements: any accessibility needs, dietary restrictions, constraints, or special requests; else "".
 
-Current known state (may be partial, use it to stay consistent but do NOT hallucinate):
-{json.dumps(current_state, ensure_ascii=False)}
-"""
+        Current known state (may be partial, use it to stay consistent but do NOT hallucinate):
+        {json.dumps(current_state, ensure_ascii=False)}
+
+        Output format requirement: Return ONLY the JSON object, with no code fences, no markdown, and no extra text.
+        """
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=message)
@@ -175,7 +178,58 @@ Current known state (may be partial, use it to stay consistent but do NOT halluc
 
         try:
             llm_response = self.model.invoke(messages)
-            data = json.loads(llm_response.content)
+
+            # Gemini sometimes returns content with markdown fences or as a list of parts.
+            content = llm_response.content
+            if isinstance(content, list):
+                # Join any text parts conservatively
+                parts: List[str] = []
+                for p in content:
+                    if isinstance(p, dict):
+                        txt = p.get("text") or p.get("content") or ""
+                        if txt:
+                            parts.append(str(txt))
+                    else:
+                        parts.append(str(p))
+                content_str = "\n".join(parts).strip()
+            else:
+                content_str = str(content).strip()
+
+            def _try_parse_json(text: str) -> Optional[Dict[str, Any]]:
+                if not text:
+                    return None
+                # 1) direct
+                try:
+                    obj = json.loads(text)
+                    if isinstance(obj, dict):
+                        return obj
+                except Exception:
+                    pass
+                # 2) fenced block ```json ... ```
+                m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+                if m:
+                    try:
+                        obj = json.loads(m.group(1))
+                        if isinstance(obj, dict):
+                            return obj
+                    except Exception:
+                        pass
+                # 3) first {...} slice
+                start = text.find("{")
+                end = text.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    candidate = text[start:end + 1]
+                    try:
+                        obj = json.loads(candidate)
+                        if isinstance(obj, dict):
+                            return obj
+                    except Exception:
+                        pass
+                return None
+
+            data = _try_parse_json(content_str)
+            if data is None:
+                raise ValueError("LLM did not return valid JSON")
 
             # Only keep non-empty values
             filtered: Dict[str, Any] = {}
@@ -247,6 +301,7 @@ Current known state (may be partial, use it to stay consistent but do NOT halluc
 
         return SystemMessage(content=text)
 
+# A mini test to see if chat agent works as expected
 if __name__ == "__main__":
     """
     Terminal REPL for ChatAgent.
@@ -309,6 +364,14 @@ if __name__ == "__main__":
                 state = json.loads(path.read_text())
                 print(f"Loaded <- {path}")
                 continue
+            # Optional: auto-complete exit if user confirms and all fields are present
+            if user.lower() in {"confirm", "yes", "y"}:
+                missing = [f for f in agent.required_fields if not state.get(f)]
+                if not missing:
+                    print("Confirmed. Final state:")
+                    print(json.dumps(state, indent=2, ensure_ascii=False))
+                    print("Bye! 👋")
+                    sys.exit(0)
 
             # 2) normal chat turn -> collect info
             out = agent.collect_info(user, state=state)
@@ -327,7 +390,7 @@ if __name__ == "__main__":
 
             # 4) show completion hint
             if out["complete"]:
-                print("✅ All required fields collected. Type /state to review or /reset to start over.")
+                print("✅ All required fields collected. Type 'confirm' to finish, or /state to review.")
 
         except KeyboardInterrupt:
             print("\nInterrupted. Type /quit to exit.")
