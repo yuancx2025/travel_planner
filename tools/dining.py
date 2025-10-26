@@ -1,57 +1,49 @@
 # tools/dining.py
-import os
-import requests
-from dotenv import load_dotenv
+"""Restaurant search using Google Places API."""
+import os, httpx
+from typing import List, Dict, Any, Optional
 
-dotenv_path = os.path.join(os.path.dirname(__file__), "../.env")
-load_dotenv(dotenv_path)
+GOOGLE_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
 
-def search_restaurants(latitude, longitude, radius=1500, keyword=None):
+def search_restaurants(latitude: float, longitude: float, radius: int = 1500, 
+                      keyword: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Search for restaurants near a given location using Google Maps Places API.
-
-    Parameters:
-        api_key (str): Your Google Maps API key
-        latitude (float): Latitude of the search location
-        longitude (float): Longitude of the search location
-        radius (int): Search radius in meters (default 1500)
-        keyword (str): Optional keyword to refine search (e.g., 'sushi', 'vegan')
-
+    Search for restaurants near a location.
+    Args:
+        latitude, longitude: Search center coordinates
+        radius: Search radius in meters (default 1500)
+        keyword: Optional keyword (e.g., 'sushi', 'vegan')
     Returns:
-        list: A list of restaurant dictionaries with name, rating, address, and coordinates
+        List of {"name", "rating", "address", "lat", "lng", "price_level"}
     """
-    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-    if not api_key:
-        raise ValueError("Missing environment variable: GOOGLE_MAPS_API_KEY")
+    if not GOOGLE_API_KEY:
+        raise ValueError("Missing GOOGLE_MAPS_API_KEY")
+    
     url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
     params = {
         "location": f"{latitude},{longitude}",
         "radius": radius,
         "type": "restaurant",
-        "key": api_key,
+        "key": GOOGLE_API_KEY,
     }
-
     if keyword:
         params["keyword"] = keyword
-
-    response = requests.get(url, params=params)
-    data = response.json()
-
+    
+    with httpx.Client(timeout=10) as client:
+        r = client.get(url, params=params)
+        data = r.json()
+    
     if data.get("status") != "OK":
-        print(f"Error: {data.get('status')}, {data.get('error_message', '')}")
         return []
-
-    restaurants = []
-    for place in data["results"]:
-        restaurants.append(
-            {
-                "name": place.get("name"),
-                "rating": place.get("rating"),
-                "address": place.get("vicinity"),
-                "lat": place["geometry"]["location"]["lat"],
-                "lng": place["geometry"]["location"]["lng"],
-                "price_level": place.get("price_level"),
-            }
-        )
-
-    return restaurants
+    
+    return [
+        {
+            "name": p.get("name"),
+            "rating": p.get("rating"),
+            "address": p.get("vicinity"),
+            "lat": p["geometry"]["location"]["lat"],
+            "lng": p["geometry"]["location"]["lng"],
+            "price_level": p.get("price_level"),
+        }
+        for p in data["results"]
+    ]
