@@ -39,11 +39,11 @@ def get_fuel_prices(location: str) -> Dict[str, Any]:
             break
     
     # State-based pricing (Oct 2025 estimates)
-    base = 3.06
+    base = 3.053  # AAA national average for REGULAR on 2025-10-26
     adjustments = {
-        "CA": 0.85, "HI": 0.95, "WA": 0.55, "OR": 0.45, "NV": 0.35,
-        "AK": 0.65, "NY": 0.25, "CT": 0.20, "IL": 0.15, "PA": 0.10,
-        "TX": -0.25, "OK": -0.30, "MS": -0.35, "LA": -0.30, "SC": -0.25,
+        "CA": 1.54, "HI": 1.43, "WA": 1.29, "OR": 0.89, "NV": 0.75,
+        "AK": 0.77, "NY": 0.06, "CT": -0.02, "IL": 0.19, "PA": 0.18,
+        "TX": -0.44, "OK": -0.44, "MS": -0.46, "LA": -0.45, "SC": -0.32,
     }
     regular = round(base + adjustments.get(state_code, 0.0), 2)
     
