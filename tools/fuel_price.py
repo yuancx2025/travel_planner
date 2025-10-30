@@ -1,64 +1,95 @@
 # tools/fuel_price.py
-"""Simplified fuel price estimates for US locations."""
+"""Fuel price tool using Gemini + Google Search grounding."""
 from __future__ import annotations
-import os, httpx
-from typing import Dict, Any
+import os
+from datetime import datetime, timezone
+from functools import lru_cache
+from pydantic import BaseModel, Field, field_validator
+from pydantic_ai import Agent
+from pydantic_ai.models.google import GoogleModel
 
-GOOGLE_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+
+class FuelPrices(BaseModel):
+    """Fuel price response (USD/gallon)."""
+    location: str
+    state: str = Field(..., description="2-letter US state code")
+    regular: float = Field(..., ge=0)
+    midgrade: float = Field(..., ge=0)
+    premium: float = Field(..., ge=0)
+    diesel: float = Field(..., ge=0)
+    currency: str = "USD"
+    unit: str = "per gallon"
+    source: str = "google_search"
+    last_updated: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    @field_validator("state")
+    @classmethod
+    def validate_state(cls, v: str) -> str:
+        if len(v) != 2 or not v.isupper():
+            return "US"  # fallback for unknown locations
+        return v
 
 class FuelPriceError(Exception):
     pass
 
-def get_fuel_prices(location: str) -> Dict[str, Any]:
+model = GoogleModel("gemini-2.0-flash-exp")
+
+agent = Agent(
+    model=model,
+    output_type=FuelPrices,
+    model_settings={
+        "tools": [{"google_search": {}}]  # Enable Google Search grounding
+    },
+    system_prompt=(
+        "You are a fuel price assistant. Use Google Search to find CURRENT average gas prices "
+        "for the requested US location. Return prices in USD per gallon. "
+        "Provide regular, midgrade, premium, and diesel prices. "
+        "Extract the 2-letter state code from the location."
+    ),
+)
+
+@lru_cache(maxsize=32)
+def _cached_query(location: str, hour_bucket: str) -> FuelPrices:
+    """Cache results for 1 hour (keyed by hour bucket)."""
+    result = agent.run_sync(
+        f"What are the current average gas prices in {location}, USA? "
+        f"Include regular, midgrade, premium, and diesel prices per gallon in USD."
+    )
+    return result.output
+
+def get_fuel_prices(location: str) -> dict:
     """
-    Get estimated fuel prices for a US location.
+    Get current fuel prices using Gemini + Google Search (cached 1 hour).
     Args:
-        location: City or state (e.g., "San Francisco", "CA")
+        location: US city or state (e.g., "San Francisco", "CA")
     Returns:
-        {"location": str, "state": str, "regular": float, "midgrade": float, 
-         "premium": float, "diesel": float, "currency": "USD", "unit": "per gallon"}
+        dict with fuel prices
     """
     if not GOOGLE_API_KEY:
-        raise FuelPriceError("Missing GOOGLE_MAPS_API_KEY")
+        raise FuelPriceError("Missing GOOGLE_API_KEY or GEMINI_API_KEY")
     
-    # Geocode to get state
-    url = "https://maps.googleapis.com/maps/api/geocode/json"
-    with httpx.Client(timeout=10) as client:
-        r = client.get(url, params={"address": location, "key": GOOGLE_API_KEY})
-        r.raise_for_status()
-        data = r.json()
+    # Cache key includes hour to expire every 60 min
+    hour_bucket = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H")
     
-    if data.get("status") != "OK":
-        raise FuelPriceError(f"Geocoding failed for '{location}'")
-    
-    # Extract state code
-    state_code = "US"
-    for comp in data["results"][0].get("address_components", []):
-        if "administrative_area_level_1" in comp.get("types", []):
-            state_code = comp.get("short_name", "US")
-            break
-    
-    # State-based pricing (Oct 2025 estimates)
-    base = 3.053  # AAA national average for REGULAR on 2025-10-26
-    adjustments = {
-        "CA": 1.54, "HI": 1.43, "WA": 1.29, "OR": 0.89, "NV": 0.75,
-        "AK": 0.77, "NY": 0.06, "CT": -0.02, "IL": 0.19, "PA": 0.18,
-        "TX": -0.44, "OK": -0.44, "MS": -0.46, "LA": -0.45, "SC": -0.32,
-    }
-    regular = round(base + adjustments.get(state_code, 0.0), 2)
-    
-    return {
-        "location": location,
-        "state": state_code,
-        "regular": regular,
-        "midgrade": round(regular + 0.30, 2),
-        "premium": round(regular + 0.60, 2),
-        "diesel": round(regular + 0.40, 2),
-        "currency": "USD",
-        "unit": "per gallon",
-        "source": "estimate",
-    }
+    try:
+        data = _cached_query(location.strip().title(), hour_bucket)
+        return data.model_dump()
+    except Exception as e:
+        raise FuelPriceError(f"Failed to get fuel prices: {e}")
 
-def get_state_gas_prices(state_code: str) -> Dict[str, Any]:
-    """Legacy function for backward compatibility."""
+def get_state_gas_prices(state_code: str) -> dict:
+    """Legacy function (backward compatibility)."""
     return get_fuel_prices(state_code)
+
+if __name__ == "__main__":
+    import argparse, json
+    p = argparse.ArgumentParser(description="Fuel price tool (Gemini + Google Search)")
+    p.add_argument("location", help="US city or state")
+    args = p.parse_args()
+    
+    try:
+        print(json.dumps(get_fuel_prices(args.location), indent=2))
+    except FuelPriceError as e:
+        print(f"❌ {e}")
+        exit(1)
