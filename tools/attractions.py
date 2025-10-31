@@ -54,6 +54,8 @@ def search_attractions(query: str, lat: Optional[float]=None, lng: Optional[floa
         "Content-Type": "application/json",
     }
     payload: Dict[str, Any] = {"textQuery": query}
+    # Ask the API to limit results server-side (v1 supports up to 20)
+    payload["maxResultCount"] = min(limit, 20)
     if lat is not None and lng is not None:
         payload["locationBias"] = {
             "circle": {"center": {"latitude": lat, "longitude": lng}, "radius": radius_m}

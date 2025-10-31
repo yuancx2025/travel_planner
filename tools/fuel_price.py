@@ -8,8 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel
 
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
-
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 class FuelPrices(BaseModel):
     """Fuel price response (USD/gallon)."""
     location: str
@@ -81,15 +80,3 @@ def get_fuel_prices(location: str) -> dict:
 def get_state_gas_prices(state_code: str) -> dict:
     """Legacy function (backward compatibility)."""
     return get_fuel_prices(state_code)
-
-if __name__ == "__main__":
-    import argparse, json
-    p = argparse.ArgumentParser(description="Fuel price tool (Gemini + Google Search)")
-    p.add_argument("location", help="US city or state")
-    args = p.parse_args()
-    
-    try:
-        print(json.dumps(get_fuel_prices(args.location), indent=2))
-    except FuelPriceError as e:
-        print(f"❌ {e}")
-        exit(1)

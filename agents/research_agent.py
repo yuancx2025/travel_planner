@@ -5,12 +5,12 @@ import os
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 
-from tools.weather_v2 import get_weather
+from tools.weather import get_weather
 from tools.attractions import search_attractions
 from tools.dining import search_restaurants
 from tools.car_rental import search_car_rentals
 from tools.hotels import search_hotels_by_city
-from tools.distance_matirx import get_distance_matrix
+from tools.distance_matrix import get_distance_matrix
 from tools.fuel_price import get_fuel_prices
 
 

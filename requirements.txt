@@ -2,6 +2,7 @@
 langgraph>=0.2
 langchain-core
 typing_extensions
+amadeus
 
 # Data validation & API
 pydantic>=2.0
@@ -17,3 +18,4 @@ watchfiles>=0.21
 
 pytest>=7.4
 pytest-asyncio>=0.21
+pytest-cov>=4.1

@@ -1,144 +1,174 @@
-"""
-Simple integration test for the agent workflow.
-Tests ChatAgent → PlannerAgent → ResearchAgent flow.
-"""
-import os
-import sys
-from pathlib import Path
+"""Lightweight agent workflow tests with mocked tool calls."""
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Dict
 
 import pytest
-from agents.planner_agent import PlannerAgent
+
 from agents.research_agent import ResearchAgent
-from agents.chat_agent import ChatAgent
+from tools import weather, distance_matrix, attractions
 
 
-# Skip if API keys not available
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("GOOGLE_API_KEY") or not os.environ.get("GOOGLE_MAPS_API_KEY"),
-    reason="GOOGLE_API_KEY or GOOGLE_MAPS_API_KEY not set"
-)
+def test_research_agent_runs_all_enabled_tools(monkeypatch):
+    calls = []
 
+    monkeypatch.setattr(ResearchAgent, "_get_weather", lambda self, state: calls.append("weather") or ["w"])
+    monkeypatch.setattr(ResearchAgent, "_get_attractions", lambda self, state: calls.append("attractions") or [
+        {"coord": {"lat": 35.0, "lng": -78.9}}
+    ])
+    monkeypatch.setattr(ResearchAgent, "_get_dining", lambda self, state: calls.append("dining") or ["d"])
+    monkeypatch.setattr(ResearchAgent, "_get_hotels", lambda self, state: calls.append("hotels") or ["h"])
+    monkeypatch.setattr(ResearchAgent, "_get_car_rentals", lambda self, state: calls.append("car_rentals") or ["c"])
+    monkeypatch.setattr(ResearchAgent, "_get_fuel_prices", lambda self, state: calls.append("fuel_prices") or {"regular": 3.5})
+    monkeypatch.setattr(ResearchAgent, "_get_distances", lambda self, attractions: calls.append("distances") or ["dist"])
 
-def test_chat_agent_info_collection():
-    """Test ChatAgent can extract user preferences."""
-    agent = ChatAgent()
-    state = {}
-    
-    # First message
-    result = agent.collect_info("My name is Alice and I want to visit San Francisco", state)
-    state = result["state"]
-    
-    assert "name" in state or "destination_city" in state
-    assert not result["complete"]  # Should still need more info
-    
-    # Second message
-    result = agent.collect_info("5 days starting November 15, 2025", state)
-    state = result["state"]
-    
-    assert len(state) > 2  # Should have collected multiple fields
-
-
-def test_research_agent_basic():
-    """Test ResearchAgent can call tools with valid state."""
-    agent = ResearchAgent()
-    
-    # Minimal valid state
-    state = {
-        "destination_city": "San Francisco",
-        "start_date": "2025-11-15",
+    state: Dict[str, str] = {
+        "destination_city": "Durham",
+        "start_date": "2025-11-20",
         "travel_days": 3,
-        "cuisine_pref": "seafood"
+        "cuisine_pref": "ramen",
+        "need_car_rental": "yes",
     }
-    
-    results = agent.research(state)
-    
-    # Should have at least weather and attractions
-    assert "weather" in results
-    assert "attractions" in results
-    
-    # Weather should have data
-    if results["weather"]:
-        assert len(results["weather"]) > 0
-        assert "date" in results["weather"][0]
-        assert "temp_high" in results["weather"][0]
 
-
-def test_research_agent_conditional_tools():
-    """Test ResearchAgent only calls tools when conditions are met."""
     agent = ResearchAgent()
-    
-    # State without cuisine preference or car rental
+    result = agent.research(state)
+
+    assert result["weather"] == ["w"]
+    assert result["attractions"][0]["coord"] == {"lat": 35.0, "lng": -78.9}
+    assert result["dining"] == ["d"]
+    assert result["hotels"] == ["h"]
+    assert result["car_rentals"] == ["c"]
+    assert result["fuel_prices"]["regular"] == 3.5
+    assert result["distances"] == ["dist"]
+    # Ensure call order touched each helper
+    assert calls == [
+        "weather",
+        "attractions",
+        "dining",
+        "hotels",
+        "car_rentals",
+        "fuel_prices",
+        "distances",
+    ]
+
+
+def test_research_agent_skips_optional_tools(monkeypatch):
+    monkeypatch.setattr(ResearchAgent, "_get_weather", lambda self, state: ["weather"])
+    monkeypatch.setattr(ResearchAgent, "_get_attractions", lambda self, state: [
+        {"coord": {"lat": 0, "lng": 0}}
+    ])
+    monkeypatch.setattr(ResearchAgent, "_get_distances", lambda self, attractions: ["dist"])
+
+    agent = ResearchAgent()
     state = {
-        "destination_city": "New York",
-        "start_date": "2025-12-01",
-        "travel_days": 2
+        "destination_city": "Durham",
+        "start_date": "2025-11-20",
+        "travel_days": 2,
+        "need_car_rental": "no",
     }
-    
-    results = agent.research(state)
-    
-    # Should NOT have dining or car rentals
-    assert results.get("dining") is None
-    assert results.get("car_rentals") is None
-    
-    # Should have weather and attractions
-    assert "weather" in results
-    assert "attractions" in results
+
+    result = agent.research(state)
+
+    assert "dining" not in result
+    assert "car_rentals" not in result
+    assert "fuel_prices" not in result
+    assert result["weather"] == ["weather"]
+    assert result["distances"] == ["dist"]
 
 
-def test_planner_agent_phases():
-    """Test PlannerAgent workflow phases."""
-    planner = PlannerAgent()
-    
-    # Phase 1: Collecting
-    response = planner.interact("I want to visit Boston")
-    assert response["phase"] == "collecting"
-    assert "state" in response
-    
-    # State should have destination
-    assert "Boston" in str(response["state"].get("destination_city", ""))
+def test_research_agent_handles_missing_city(monkeypatch):
+    monkeypatch.setattr(ResearchAgent, "_get_weather", lambda self, state: ["weather"])
+    monkeypatch.setattr(ResearchAgent, "_get_attractions", lambda self, state: [])
+
+    agent = ResearchAgent()
+    state = {"start_date": "2025-11-20", "travel_days": 3}
+
+    assert agent.research(state) == {}
 
 
-def test_planner_agent_state_persistence():
-    """Test PlannerAgent maintains state across interactions."""
-    planner = PlannerAgent()
-    
-    # Multiple interactions
-    r1 = planner.interact("My name is Bob")
-    r2 = planner.interact("I want to go to Seattle")
-    
-    # Both pieces of info should be in final state
-    final_state = r2["state"]
-    assert "name" in final_state or "destination_city" in final_state
+def test_weather_get_weather_normalizes(monkeypatch, fake_response):
+    monkeypatch.setattr(weather, "GOOGLE_MAPS_API_KEY", "fake")
+
+    def _fake_request(method: str, url: str, **kw):  # pragma: no cover - exercised via call
+        if "geocode" in url:
+            return fake_response({
+                "status": "OK",
+                "results": [
+                    {"geometry": {"location": {"lat": 35.0, "lng": -78.9}}}
+                ],
+            })
+        return fake_response({
+            "daily": {
+                "time": [datetime.now().strftime("%Y-%m-%d")],
+                "temperature_2m_max": [68.0],
+                "temperature_2m_min": [50.0],
+                "precipitation_sum": [0.5],
+                "weather_code": [0],
+            }
+        })
+
+    monkeypatch.setattr(weather, "_request", _fake_request)
+
+    start_date = datetime.now().strftime("%Y-%m-%d")
+    forecast = weather.get_weather("Durham", start_date, 1, units="imperial")
+
+    assert forecast[0]["temp_high"] == "68 °F"
+    assert forecast[0]["temp_low"] == "50 °F"
+    assert forecast[0]["precipitation"].endswith("in")
+    assert forecast[0]["summary"] == "Clear sky"
 
 
-def test_end_to_end_minimal():
-    """
-    Minimal end-to-end test: provide all required fields and verify
-    we reach research phase.
-    """
-    planner = PlannerAgent()
-    
-    # Provide comprehensive info in one message
-    message = (
-        "My name is Charlie, I want to visit Los Angeles for 4 days "
-        "starting 2025-11-20. My budget is $2000 for 2 people, no kids. "
-        "I prefer outdoor activities, need a car rental, want 1 king bed, "
-        "and love Mexican food."
-    )
-    
-    response = planner.interact(message)
-    
-    # Should either be collecting (if extraction missed fields) or researching
-    assert response["phase"] in ["collecting", "researching", "planning", "complete"]
-    
-    # State should have most fields
-    state = response["state"]
-    assert len(state) >= 5  # Should have extracted multiple fields
+def test_distance_matrix_resolves_place_ids(monkeypatch, fake_response):
+    monkeypatch.setattr(distance_matrix, "GOOGLE_MAPS_API_KEY", "fake")
+
+    def _fake_request(method: str, url: str, **kw):  # pragma: no cover - exercised via call
+        if "places" in url:
+            query = kw["json"]["textQuery"]
+            return fake_response({"places": [{"id": f"places/{query}-id"}]})
+        return fake_response([
+            {
+                "originIndex": 0,
+                "destinationIndex": 0,
+                "distanceMeters": 1600,
+                "duration": "600s",
+                "status": "OK",
+            }
+        ])
+
+    monkeypatch.setattr(distance_matrix, "_request", _fake_request)
+
+    results = distance_matrix.get_distance_matrix(["Durham"], ["Raleigh"])
+
+    assert results[0]["distance_m"] == 1600
+    assert results[0]["duration_s"] == 600
+    assert results[0]["status"] == "OK"
 
 
-if __name__ == "__main__":
-    # Run tests with verbose output
-    pytest.main([__file__, "-v", "-s"])
+def test_attractions_search_returns_normalized(monkeypatch, fake_response):
+    monkeypatch.setattr(attractions, "GOOGLE_MAPS_API_KEY", "fake")
+
+    def _fake_request(method: str, url: str, **kw):  # pragma: no cover - exercised via call
+        return fake_response({
+            "places": [
+                {
+                    "id": "place-1",
+                    "displayName": {"text": "History Museum"},
+                    "shortFormattedAddress": "123 Main St",
+                    "location": {"latitude": 35.0, "longitude": -78.9},
+                    "primaryType": "museum",
+                    "rating": 4.7,
+                    "userRatingCount": 210,
+                }
+            ]
+        })
+
+    monkeypatch.setattr(attractions, "_request", _fake_request)
+
+    results = attractions.search_attractions("museums in Durham", limit=1)
+
+    assert results[0]["id"] == "place-1"
+    assert results[0]["name"] == "History Museum"
+    assert results[0]["coord"] == {"lat": 35.0, "lng": -78.9}
+    assert results[0]["source"] == "google"
