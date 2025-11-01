@@ -4,6 +4,7 @@ PlannerAgent: Orchestrates ChatAgent → ResearchAgent → Travel Plan.
 High-level coordinator that manages the conversation → research → planning workflow.
 """
 from __future__ import annotations
+import math
 import os
 from typing import Any, Dict, List, Optional, Generator
 from datetime import datetime
@@ -13,6 +14,52 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from agents.chat_agent import ChatAgent
 from agents.research_agent import ResearchAgent
+from agents.itinerary_agent import ItineraryAgent
+from agents.budget_agent import BudgetAgent
+
+
+class AttractionSelectionAgent:
+    """Curate attractions and help interpret the user's choices."""
+
+    def __init__(self, max_options: int = 5) -> None:
+        self.max_options = max_options
+
+    def present_options(self, attractions: List[Dict[str, Any]]) -> tuple[str, List[Dict[str, Any]]]:
+        shortlist = (attractions or [])[: self.max_options]
+        if not shortlist:
+            return ("I couldn't find standout attractions to shortlist, so feel free to tell me what interests you.", [])
+
+        def _line(idx: int, item: Dict[str, Any]) -> str:
+            rating = item.get("rating")
+            badge = f" ({rating}★)" if rating else ""
+            return f"{idx}. {item.get('name', 'Attraction')}{badge}"
+
+        lines = ["Here are a few attractions that match your trip:"]
+        lines.extend(_line(idx, item) for idx, item in enumerate(shortlist, 1))
+        lines.append("Reply with the numbers of the spots you like (e.g., '1 3') or mention them by name.")
+        return ("\n".join(lines), shortlist)
+
+    def parse_selection(self, user_message: str, shortlist: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not user_message or not shortlist:
+            return []
+
+        tokens = [token.strip() for token in user_message.replace(",", " ").split() if token.strip()]
+        numeric = [shortlist[int(t) - 1] for t in tokens if t.isdigit() and 1 <= int(t) <= len(shortlist)]
+
+        if numeric:
+            chosen = numeric
+        else:
+            lowered = user_message.lower()
+            chosen = [item for item in shortlist if (item.get("name") or "").lower() in lowered]
+
+        dedup: List[Dict[str, Any]] = []
+        seen = set()
+        for item in chosen:
+            key = item.get("id") or item.get("name")
+            if key and key not in seen:
+                dedup.append(item)
+                seen.add(key)
+        return dedup
 
 
 class PlannerAgent:
@@ -27,32 +74,32 @@ class PlannerAgent:
         self.chat_agent = ChatAgent(model_name=model_name, temperature=0.2)
         self.research_agent = ResearchAgent()
         self.planner_model = ChatGoogleGenerativeAI(model=model_name, temperature=temperature)
+        self.selection_agent = AttractionSelectionAgent()
+        self.itinerary_agent = ItineraryAgent()
+        self.budget_agent = BudgetAgent()
         self.user_state: Dict[str, Any] = {}
         self.research_results: Optional[Dict[str, Any]] = None
+        self.presented_attractions = []
+        self.selected_attractions = []
+        self.itinerary_summary = None
+        self.phase = "collecting"
 
     # ==================== PUBLIC API ====================
 
     def interact(self, user_message: str) -> Dict[str, Any]:
-        """
-        Main interaction loop:
-        - If collecting info: delegate to ChatAgent
-        - If info complete: trigger research and generate plan
-        
-        Returns:
-            {
-                "phase": "collecting" | "researching" | "planning" | "complete",
-                "message": str,  # response to user
-                "state": {...},  # current user preferences
-                "plan": {...} | None,  # final travel plan (if phase == "complete")
-            }
-        """
-        # 1. Collect user info via ChatAgent
+        """Route the conversation through collection → research → selection → plan."""
+
+        if self.phase == "selection":
+            return self._handle_selection_message(user_message)
+
+        if self.phase == "complete":
+            return self._generate_plan()
+
+        # Default to information gathering until requirements are met.
         result = self.chat_agent.collect_info(user_message, state=self.user_state)
         self.user_state = result["state"]
-        
-        # 2. Check if collection is complete
+
         if not result["complete"]:
-            # Still gathering info
             return {
                 "phase": "collecting",
                 "message": self._stream_to_text(result["stream"]),
@@ -60,13 +107,15 @@ class PlannerAgent:
                 "missing_fields": result["missing_fields"],
                 "plan": None,
             }
-        
-        # 3. Info complete → trigger research
+
         if self.research_results is None:
             return self._trigger_research()
-        
-        # 4. Research done → generate final plan
-        return self._generate_plan()
+
+        if self.selected_attractions and self.itinerary_summary:
+            return self._generate_plan()
+
+        # We have preferences and research but still need selections.
+        return self._handle_selection_message(user_message)
 
     def get_plan(self) -> Optional[Dict[str, Any]]:
         """
@@ -83,11 +132,12 @@ class PlannerAgent:
         Execute research phase using ResearchAgent.
         """
         print("\n🔍 Triggering research based on your preferences...\n")
-        
+
         try:
             self.research_results = self.research_agent.research(self.user_state)
-            
-            # Build summary message
+            self.selected_attractions = []
+            self.itinerary_summary = None
+
             summary_parts = []
             if self.research_results.get("weather"):
                 summary_parts.append(f"✓ Weather forecast ({len(self.research_results['weather'])} days)")
@@ -99,15 +149,27 @@ class PlannerAgent:
                 summary_parts.append(f"✓ Hotels ({len(self.research_results['hotels'])} options)")
             if self.research_results.get("car_rentals"):
                 summary_parts.append(f"✓ Car rentals ({len(self.research_results['car_rentals'])} options)")
-            
+            if self.research_results.get("fuel_prices"):
+                # Check if it contains car rental daily rates
+                fp = self.research_results["fuel_prices"]
+                has_rental_rates = any(fp.get(k) for k in ["economy_car_daily", "compact_car_daily", "midsize_car_daily", "suv_daily"])
+                if has_rental_rates:
+                    summary_parts.append("✓ Fuel prices & car rental daily rates")
+                else:
+                    summary_parts.append("✓ Fuel prices")
+
+            selection_text, shortlist = self.selection_agent.present_options(self.research_results.get("attractions"))
+            self.presented_attractions = shortlist
+            self.phase = "selection"
+
             message = (
-                "Great! I've gathered all the information for your trip. Here's what I found:\n\n"
-                + "\n".join(summary_parts)
-                + "\n\nGenerating your personalized travel plan..."
+                "Great! I've gathered research for your trip:\n"
+                + ("\n".join(summary_parts) + "\n\n" if summary_parts else "")
+                + selection_text
             )
-            
+
             return {
-                "phase": "researching",
+                "phase": "selection",
                 "message": message,
                 "state": self.user_state,
                 "plan": None,
@@ -119,6 +181,51 @@ class PlannerAgent:
                 "state": self.user_state,
                 "plan": None,
             }
+
+    def _handle_selection_message(self, user_message: str) -> Dict[str, Any]:
+        if not self.research_results:
+            return self._trigger_research()
+
+        if not self.presented_attractions:
+            selection_text, shortlist = self.selection_agent.present_options(self.research_results.get("attractions"))
+            self.presented_attractions = shortlist
+            return {
+                "phase": "selection",
+                "message": selection_text,
+                "state": self.user_state,
+                "plan": None,
+            }
+
+        chosen = self.selection_agent.parse_selection(user_message, self.presented_attractions)
+        if not chosen:
+            prompt = (
+                "I didn't catch which attractions you liked. "
+                "Please reply with the numbers from the list (e.g., '1 3') or mention them by name."
+            )
+            return {
+                "phase": "selection",
+                "message": prompt,
+                "state": self.user_state,
+                "plan": None,
+            }
+
+        self.selected_attractions = chosen
+        return self._generate_itinerary()
+
+    def _generate_itinerary(self) -> Dict[str, Any]:
+        self.itinerary_summary = self.itinerary_agent.build_itinerary(
+            self.user_state,
+            self.selected_attractions,
+            self.research_results or {},
+        )
+        budget = self.budget_agent.compute_budget(
+            self.user_state,
+            self.research_results or {},
+            self.itinerary_summary,
+        )
+        self.itinerary_summary["budget"] = budget
+        self.phase = "planning"
+        return self._generate_plan()
 
     def _generate_plan(self) -> Dict[str, Any]:
         """
@@ -132,8 +239,13 @@ class PlannerAgent:
                 "plan": None,
             }
         
-        # Build context for LLM
-        context = self._build_planning_context()
+        context = self.itinerary_agent.build_planning_context(
+            self.user_state,
+            self.research_results,
+            self.itinerary_summary,
+            self.itinerary_summary.get("budget") if self.itinerary_summary else None,
+            self.selected_attractions,
+        )
         
         # Generate plan
         system_msg = SystemMessage(content=(
@@ -155,7 +267,14 @@ class PlannerAgent:
         try:
             response = self.planner_model.invoke([system_msg, user_msg])
             plan_text = response.content
-            
+            if self.itinerary_summary and self.itinerary_summary.get("budget"):
+                budget = self.itinerary_summary["budget"]
+                plan_text = (
+                    f"{plan_text}\n\n---\nBudget range (USD): "
+                    f"${budget['low']} – ${budget['high']} (expected ${budget['expected']})."
+                )
+
+            self.phase = "complete"
             return {
                 "phase": "complete",
                 "message": plan_text,
@@ -164,6 +283,8 @@ class PlannerAgent:
                     "text": plan_text,
                     "research_data": self.research_results,
                     "preferences": self.user_state,
+                    "selected_attractions": self.selected_attractions,
+                    "itinerary": self.itinerary_summary,
                     "generated_at": datetime.now().isoformat(),
                 },
             }
@@ -175,103 +296,6 @@ class PlannerAgent:
                 "plan": None,
             }
 
-    def _build_planning_context(self) -> str:
-        """
-        Build a comprehensive context string for the planning LLM.
-        """
-        lines = ["=== USER PREFERENCES ==="]
-        lines.append(f"Name: {self.user_state.get('name', 'N/A')}")
-        lines.append(f"Destination: {self.user_state.get('destination_city', 'N/A')}")
-        lines.append(f"Duration: {self.user_state.get('travel_days', 'N/A')} days")
-        lines.append(f"Start Date: {self.user_state.get('start_date', 'N/A')}")
-        lines.append(f"Budget: ${self.user_state.get('budget_usd', 'N/A')} USD")
-        lines.append(f"Travelers: {self.user_state.get('num_people', 'N/A')} people")
-        lines.append(f"Kids: {self.user_state.get('kids', 'N/A')}")
-        lines.append(f"Activity Preference: {self.user_state.get('activity_pref', 'N/A')}")
-        lines.append(f"Cuisine Preference: {self.user_state.get('cuisine_pref', 'N/A')}")
-        lines.append(f"Car Rental: {self.user_state.get('need_car_rental', 'N/A')}")
-        lines.append("")
-        
-        # Weather
-        if self.research_results.get("weather"):
-            lines.append("=== WEATHER FORECAST ===")
-            for day in self.research_results["weather"][:5]:  # first 5 days
-                lines.append(
-                    f"{day['date']}: {day['temp_low']} to {day['temp_high']}, "
-                    f"{day['summary']}, Precipitation: {day['precipitation']}"
-                )
-            lines.append("")
-        
-        # Attractions
-        if self.research_results.get("attractions"):
-            lines.append("=== TOP ATTRACTIONS ===")
-            for i, attr in enumerate(self.research_results["attractions"][:8], 1):
-                rating = f"{attr.get('rating', 'N/A')}⭐" if attr.get("rating") else "No rating"
-                lines.append(
-                    f"{i}. {attr['name']} ({rating}, {attr.get('review_count', 0)} reviews) - "
-                    f"{attr.get('address', 'N/A')}"
-                )
-            lines.append("")
-        
-        # Dining
-        if self.research_results.get("dining"):
-            lines.append("=== RESTAURANT RECOMMENDATIONS ===")
-            for i, rest in enumerate(self.research_results["dining"][:6], 1):
-                rating = f"{rest.get('rating', 'N/A')}⭐" if rest.get("rating") else "No rating"
-                price = "$" * rest.get("price_level", 2)
-                lines.append(
-                    f"{i}. {rest['name']} ({rating}, {price}) - {rest.get('address', 'N/A')}"
-                )
-            lines.append("")
-        
-        # Hotels
-        if self.research_results.get("hotels"):
-            lines.append("=== HOTEL OPTIONS ===")
-            for i, hotel in enumerate(self.research_results["hotels"][:5], 1):
-                lines.append(
-                    f"{i}. {hotel.get('name', 'N/A')} - ${hotel.get('price', 'N/A')} {hotel.get('currency', 'USD')} - "
-                    f"Rating: {hotel.get('rating', 'N/A')}"
-                )
-            lines.append("")
-        
-        # Car Rentals
-        if self.research_results.get("car_rentals"):
-            lines.append("=== CAR RENTAL OPTIONS ===")
-            for i, car in enumerate(self.research_results["car_rentals"][:5], 1):
-                veh = car.get("vehicle", {})
-                price = car.get("price", {})
-                lines.append(
-                    f"{i}. {car.get('supplier', 'N/A')} - {veh.get('class', 'N/A')} "
-                    f"({veh.get('seats', 'N/A')} seats, {veh.get('transmission', 'N/A')}) - "
-                    f"${price.get('amount', 'N/A')} {price.get('currency', 'USD')}"
-                )
-            lines.append("")
-        
-        # Fuel Prices
-        if self.research_results.get("fuel_prices"):
-            fp = self.research_results["fuel_prices"]
-            lines.append("=== FUEL PRICES ===")
-            lines.append(f"Location: {fp.get('location', 'N/A')} ({fp.get('state', 'N/A')})")
-            lines.append(f"Regular: ${fp.get('regular', 'N/A')}/{fp.get('unit', 'gallon')}")
-            lines.append(f"Midgrade: ${fp.get('midgrade', 'N/A')}/{fp.get('unit', 'gallon')}")
-            lines.append(f"Premium: ${fp.get('premium', 'N/A')}/{fp.get('unit', 'gallon')}")
-            lines.append(f"Diesel: ${fp.get('diesel', 'N/A')}/{fp.get('unit', 'gallon')}")
-            lines.append(f"Source: {fp.get('source', 'N/A')}")
-            lines.append("")
-        
-        # Distances
-        if self.research_results.get("distances"):
-            lines.append("=== DISTANCES BETWEEN TOP ATTRACTIONS ===")
-            for dist in self.research_results["distances"][:5]:
-                km = dist.get("distance_m", 0) / 1000
-                mins = dist.get("duration_s", 0) / 60
-                lines.append(
-                    f"{dist.get('origin_name', 'Origin')} → {dist.get('dest_name', 'Dest')}: "
-                    f"{km:.1f} km, {mins:.0f} min drive"
-                )
-            lines.append("")
-        
-        return "\n".join(lines)
 
     # ==================== HELPERS ====================
 
@@ -299,6 +323,10 @@ class PlannerAgent:
         self.chat_agent = ChatAgent()
         self.user_state = {}
         self.research_results = None
+        self.presented_attractions = []
+        self.selected_attractions = []
+        self.itinerary_summary = None
+        self.phase = "collecting"
 
 
 # ==================== EXAMPLE USAGE ====================
