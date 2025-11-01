@@ -5,11 +5,13 @@ Provider: Open-Meteo (forecast only, ≤15 days ahead).
 Geocoding: Google Geocoding API (city → lat/lng).
 """
 from __future__ import annotations
+
 import os
-import time
 import random
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
+
 import httpx
 
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
@@ -42,17 +44,17 @@ def _geocode(city: str) -> tuple[float, float]:
     params = {"address": city, "key": GOOGLE_MAPS_API_KEY}
     r = _request("GET", GEOCODE_URL, params=params)
     data = r.json()
-    
+
     # If first attempt fails, try adding country/world to help disambiguation
     if data.get("status") != "OK" or not data.get("results"):
         # Try with world context
         params = {"address": f"{city}, World", "key": GOOGLE_MAPS_API_KEY}
         r = _request("GET", GEOCODE_URL, params=params)
         data = r.json()
-        
+
         if data.get("status") != "OK" or not data.get("results"):
             raise ValueError(f"Geocoding failed for '{city}'. Status: {data.get('status')}. Try being more specific (e.g., 'Tokyo, Japan')")
-    
+
     loc = data["results"][0]["geometry"]["location"]
     return loc["lat"], loc["lng"]
 
@@ -75,26 +77,26 @@ def get_weather(
     """
     # Geocode city
     lat, lng = _geocode(city)
-    
+
     # Parse dates
     try:
         start = datetime.strptime(start_date, "%Y-%m-%d")
     except ValueError:
         raise ValueError("start_date must be YYYY-MM-DD")
-    
+
     duration = max(1, min(duration, 15))  # clamp to [1, 15]
     end = start + timedelta(days=duration - 1)
-    
+
     # Check forecast horizon
     if end > datetime.now() + timedelta(days=15):
         raise ValueError("Weather forecast only available for next 15 days")
-    
+
     # Unit config
     temp_unit = "celsius" if units == "metric" else "fahrenheit"
     precip_unit = "mm" if units == "metric" else "inch"
     temp_sfx = "°C" if units == "metric" else "°F"
     precip_sfx = "mm" if units == "metric" else "in"
-    
+
     # Call Open-Meteo
     params = {
         "latitude": lat,
@@ -108,7 +110,7 @@ def get_weather(
     }
     r = _request("GET", FORECAST_URL, params=params)
     data = r.json()
-    
+
     # Normalize output
     daily = data.get("daily", {})
     dates = daily.get("time", [])
@@ -116,7 +118,7 @@ def get_weather(
     tmin = daily.get("temperature_2m_min", [])
     precip = daily.get("precipitation_sum", [])
     codes = daily.get("weather_code", [])
-    
+
     _WMO_SUMMARY = {
         0: "Clear sky", 1: "Partly cloudy", 2: "Partly cloudy", 3: "Overcast",
         45: "Foggy", 48: "Foggy",

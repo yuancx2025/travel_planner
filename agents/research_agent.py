@@ -1,19 +1,20 @@
 # agents/research_agent.py
 """ResearchAgent: Tool coordinator for travel research."""
 from __future__ import annotations
-import os
+
 import asyncio
-from typing import Any, Dict, List, Optional, Tuple
+import os
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_exponential
 
-from tools.weather import get_weather
 from tools.attractions import search_attractions
-from tools.dining import search_restaurants
-from tools.hotels import search_hotels_by_city
-from tools.distance_matrix import get_distance_matrix
 from tools.car_price import get_car_and_fuel_prices
+from tools.dining import search_restaurants
+from tools.distance_matrix import get_distance_matrix
+from tools.hotels import search_hotels_by_city
+from tools.weather import get_weather
 
 
 class ResearchAgent:
@@ -31,7 +32,7 @@ class ResearchAgent:
             missing.append("RAPIDAPI_KEY (for car rentals)")
         if not os.getenv("AMADEUS_API_KEY") or not os.getenv("AMADEUS_API_SECRET"):
             missing.append("AMADEUS_API_KEY/SECRET (for hotels)")
-        
+
         if missing:
             print(f"⚠️  Warning: Missing API keys: {', '.join(missing)}")
 

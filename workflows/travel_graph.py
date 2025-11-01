@@ -1,6 +1,7 @@
 # workflow/travel_graph.py
-from langgraph.graph import StateGraph, END
 from agents.state import TravelState
+from langgraph.graph import END, StateGraph
+
 
 # This is an example of building a travel planning workflow graph.
 def build_graph(chatter, planner, researcher, constraint, enforcer, budget, quality):

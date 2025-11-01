@@ -1,10 +1,12 @@
 # tools/dining.py
 """Restaurant search using Google Places API (New) v1 - Text Search."""
 from __future__ import annotations
+
 import os
-import time
 import random
-from typing import List, Dict, Any, Optional
+import time
+from typing import Any, Dict, List, Optional
+
 import httpx
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
@@ -57,7 +59,7 @@ def search_restaurants(
         raise ValueError(
             "Missing GOOGLE_MAPS_API_KEY."
         )
-    
+
     headers = {
         "X-Goog-Api-Key": GOOGLE_API_KEY,
         # Request only needed fields (field mask is required for v1)
@@ -73,7 +75,7 @@ def search_restaurants(
         ]),
         "Content-Type": "application/json",
     }
-    
+
     # If caller passed only a location-like string without category and no lat/lng,
     # make it a categorical query so Text Search returns restaurants in that area.
     if lat is None and lng is None:
@@ -95,7 +97,7 @@ def search_restaurants(
         "strictTypeFiltering": True,
         "rankPreference": "RELEVANCE",
     }
-    
+
     # Optional: add location bias if lat/lng provided
     if lat is not None and lng is not None:
         payload["locationBias"] = {
@@ -104,7 +106,7 @@ def search_restaurants(
                 "radius": radius_m
             }
         }
-    
+
     try:
         r = _request("POST", f"{BASE}/places:searchText", headers=headers, json=payload)
     except httpx.HTTPStatusError as e:
@@ -115,10 +117,10 @@ def search_restaurants(
                 f"Response: {detail}"
             ) from e
         raise
-    
+
     data = r.json()
     out: List[Dict[str, Any]] = []
-    
+
     for p in data.get("places", []):
         loc = p.get("location") or {}
         out.append({
@@ -135,5 +137,5 @@ def search_restaurants(
             "price_level": p.get("priceLevel"),  # v1 returns string: "PRICE_LEVEL_INEXPENSIVE", "PRICE_LEVEL_MODERATE", etc.
             "raw": p,  # preserve raw for audit
         })
-    
+
     return out

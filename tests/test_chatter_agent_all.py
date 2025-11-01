@@ -1,15 +1,16 @@
 # tests/test_chatter_agent_all.py
-import json
-import types
 import importlib
-import pytest
-import sys
+import json
 import os
+import sys
+import types
+
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # --- CHANGE THIS to your actual module path ---
-MODULE_IMPORT = "agents.chat_agent"   
+MODULE_IMPORT = "agents.chat_agent"
 
 # -----------------------
 # Fake LLM for unit tests
