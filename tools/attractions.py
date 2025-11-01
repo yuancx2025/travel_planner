@@ -1,10 +1,12 @@
 # tools/attractions.py
 from __future__ import annotations
+
 import os
-import time
 import random
-import httpx
+import time
 from typing import Any, Dict, List, Optional
+
+import httpx
 
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
 BASE = "https://places.googleapis.com/v1"

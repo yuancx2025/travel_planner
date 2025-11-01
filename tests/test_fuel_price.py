@@ -68,13 +68,13 @@ def test_get_car_and_fuel_prices_returns_combined_data(monkeypatch):
     assert result["state"] == "CA"
     assert result["regular"] == pytest.approx(4.8)
     assert result["diesel"] == pytest.approx(5.1)
-    
+
     # Verify car rental daily rates
     assert result["economy_car_daily"] == pytest.approx(50.0)
     assert result["compact_car_daily"] == pytest.approx(60.0)
     assert result["midsize_car_daily"] == pytest.approx(70.0)
     assert result["suv_daily"] == pytest.approx(90.0)
-    
+
     # Verify metadata
     assert result["currency"] == "USD"
     assert result["fuel_unit"] == "per gallon"

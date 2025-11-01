@@ -47,7 +47,7 @@ class BudgetAgent:
         if car_needed:
             rental = (research.get("car_rentals") or [{}])[0]
             car_price = self._price_to_float(rental.get("price"))
-            
+
             # NOTE: fuel_prices dict now also contains car rental daily rates
             # (economy_car_daily, compact_car_daily, midsize_car_daily, suv_daily)
             # Available for future budget estimation enhancements

@@ -167,7 +167,7 @@ class ItineraryAgent:
             lines.append(f"Diesel: ${fp.get('diesel', 'N/A')}/{fp.get('unit', 'gallon')}")
             lines.append(f"Source: {fp.get('source', 'N/A')}")
             lines.append("")
-            
+
             # Display car rental daily rates if available
             rental_rates = []
             if fp.get('economy_car_daily'):
@@ -178,7 +178,7 @@ class ItineraryAgent:
                 rental_rates.append(f"Midsize: ${fp['midsize_car_daily']}/day")
             if fp.get('suv_daily'):
                 rental_rates.append(f"SUV: ${fp['suv_daily']}/day")
-            
+
             if rental_rates:
                 lines.append("=== CAR RENTAL DAILY RATES ===")
                 lines.extend(rental_rates)

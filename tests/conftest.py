@@ -7,7 +7,6 @@ from typing import Any, Dict
 
 import pytest
 
-
 # Ensure placeholder keys exist so modules that read env on import succeed.
 os.environ.setdefault("GOOGLE_MAPS_API_KEY", "test-maps-key")
 os.environ.setdefault("GOOGLE_API_KEY", "test-google-key")

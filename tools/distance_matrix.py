@@ -1,9 +1,11 @@
 from __future__ import annotations
+
 import os
-import time
 import random
-import httpx
+import time
 from typing import Any, Dict, List, Tuple, Union  # <- add Union
+
+import httpx
 
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
 BASE = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix"
@@ -50,20 +52,20 @@ def _waypoint_from_input(item: Union[Tuple[float, float], str]) -> Dict[str, Any
     r = _request("POST", PLACES_SEARCH_URL, headers=headers, json=payload)
     data = r.json()
     places = data.get("places") or []
-    
+
     # If first attempt fails, try adding ", USA" for disambiguation (common US travel case)
     if not places:
         payload["textQuery"] = f"{item}, USA"
         r = _request("POST", PLACES_SEARCH_URL, headers=headers, json=payload)
         data = r.json()
         places = data.get("places") or []
-    
+
     if not places:
         raise ValueError(
             f"Could not resolve place: '{item}'. "
             f"Try being more specific (e.g., 'Durham, NC' or 'Chapel Hill, North Carolina')"
         )
-    
+
     pid = places[0].get("id", "")
     # Places v1 returns resource name like 'places/ChIJ...'; Routes Waypoint.placeId expects 'ChIJ...'
     if pid.startswith("places/"):

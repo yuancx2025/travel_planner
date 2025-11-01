@@ -1,10 +1,12 @@
 # tools/car_price.py
 """Combined fuel prices and car rental rates tool using Gemini + Google Search grounding."""
 from __future__ import annotations
+
 import os
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Optional
+
 from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel
@@ -15,19 +17,19 @@ class CarAndFuelPrices(BaseModel):
     """Combined car rental and fuel price response."""
     location: str
     state: str = Field(..., description="2-letter US state code")
-    
+
     # Fuel prices (USD/gallon)
     regular: float = Field(..., ge=0, description="Regular gas price per gallon")
     midgrade: float = Field(..., ge=0, description="Midgrade gas price per gallon")
     premium: float = Field(..., ge=0, description="Premium gas price per gallon")
     diesel: float = Field(..., ge=0, description="Diesel price per gallon")
-    
+
     # Car rental daily rates (USD/day)
     economy_car_daily: Optional[float] = Field(None, ge=0, description="Economy car rental per day")
     compact_car_daily: Optional[float] = Field(None, ge=0, description="Compact car rental per day")
     midsize_car_daily: Optional[float] = Field(None, ge=0, description="Midsize car rental per day")
     suv_daily: Optional[float] = Field(None, ge=0, description="SUV rental per day")
-    
+
     currency: str = "USD"
     fuel_unit: str = "per gallon"
     rental_unit: str = "per day"
@@ -86,10 +88,10 @@ def get_car_and_fuel_prices(location: str) -> dict:
     """
     if not GOOGLE_API_KEY:
         raise CarPriceError("Missing GOOGLE_API_KEY or GEMINI_API_KEY")
-    
+
     # Cache key includes hour to expire every 60 min
     hour_bucket = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H")
-    
+
     try:
         data = _cached_query(location.strip().title(), hour_bucket)
         return data.model_dump()

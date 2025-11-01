@@ -1,5 +1,6 @@
 # hotels.py
 import os
+
 from amadeus import Client, ResponseError
 from dotenv import load_dotenv
 
@@ -44,15 +45,15 @@ CITY_TO_IATA = {
 
 def _resolve_city_code(city_input: str) -> str:
     city_clean = city_input.strip().lower()
-    
+
     # Fast path: already a 3-letter IATA code
     if len(city_clean) == 3 and city_clean.isalpha():
         return city_clean.upper()
-    
+
     # Fast path: known city in lookup table
     if city_clean in CITY_TO_IATA:
         return CITY_TO_IATA[city_clean]
-    
+
     # Unknown city - provide helpful error
     raise ValueError(
         f"Could not resolve city '{city_input}' to IATA code.\n"
@@ -77,16 +78,16 @@ def search_hotels_by_city(city_code, check_in, check_out, adults=2, limit=10):
     try:
         # Resolve city name to IATA code
         resolved_code = _resolve_city_code(city_code)
-        
+
         # 1️⃣ Get hotel IDs for the city
         hotel_list = amadeus.reference_data.locations.hotels.by_city.get(
             cityCode=resolved_code
         )
-        
+
         if not hotel_list.data:
             print(f"⚠️  No hotels found for '{city_code}' (resolved to {resolved_code}).")
             return []
-        
+
         # Take multiple hotels to increase chance of finding availability
         hotel_ids = [h["hotelId"] for h in hotel_list.data[:limit]]
         print(f"🔍 Found {len(hotel_ids)} hotels near '{city_code}' ({resolved_code}), checking availability...")
@@ -113,7 +114,7 @@ def search_hotels_by_city(city_code, check_in, check_out, adults=2, limit=10):
             offers_list = offer.get("offers", [])
             if not offers_list:
                 continue
-            
+
             price = offers_list[0].get("price", {})
             results.append(
                 {
@@ -137,7 +138,7 @@ def search_hotels_by_city(city_code, check_in, check_out, adults=2, limit=10):
         print(f"❌ Amadeus API error: {error}")
         if hasattr(error, "response") and error.response:
             print(f"Details: {error.response.body}")
-        
+
         # Common error guidance
         error_str = str(error)
         if "NO ROOMS AVAILABLE" in error_str:
@@ -148,5 +149,5 @@ def search_hotels_by_city(city_code, check_in, check_out, adults=2, limit=10):
         elif "INVALID FORMAT" in error_str or "cityCode" in error_str:
             print("\n💡 Use 3-letter IATA airport codes or supported city names")
             print("  Check docs/HOTEL_CITY_CODES.md for the full list")
-        
+
         return []
