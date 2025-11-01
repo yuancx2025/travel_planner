@@ -1,6 +1,8 @@
 # tools/attractions.py
 from __future__ import annotations
-import os, time, random
+import os
+import time
+import random
 import httpx
 from typing import Any, Dict, List, Optional
 

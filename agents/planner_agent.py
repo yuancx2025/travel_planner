@@ -4,7 +4,6 @@ PlannerAgent: Orchestrates ChatAgent → ResearchAgent → Travel Plan.
 High-level coordinator that manages the conversation → research → planning workflow.
 """
 from __future__ import annotations
-import math
 import os
 from typing import Any, Dict, List, Optional, Generator
 from datetime import datetime

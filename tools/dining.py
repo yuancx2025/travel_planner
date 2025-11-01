@@ -1,7 +1,9 @@
 # tools/dining.py
 """Restaurant search using Google Places API (New) v1 - Text Search."""
 from __future__ import annotations
-import os, time, random
+import os
+import time
+import random
 from typing import List, Dict, Any, Optional
 import httpx
 

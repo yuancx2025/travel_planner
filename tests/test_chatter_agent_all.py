@@ -252,7 +252,7 @@ def test_conversation_history_grows(empty_agent):
     out1 = agent.collect_info("I'm Sam", state=state)
     # Next: add destination
     agent.model = FakeModel(queue=[{"destination_city": "Denver"}])
-    out2 = agent.collect_info("Going to Denver", state=out1["state"])
+    agent.collect_info("Going to Denver", state=out1["state"])
 
     # The conversation history should contain at least:
     # [system_init, human_turn1, human_turn2]

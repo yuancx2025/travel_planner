@@ -1,10 +1,9 @@
 # tools/streetview.py
 from __future__ import annotations
 
-import asyncio
 import os
 import urllib.parse
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import httpx
 

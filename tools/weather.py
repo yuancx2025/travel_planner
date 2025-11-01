@@ -5,9 +5,11 @@ Provider: Open-Meteo (forecast only, ≤15 days ahead).
 Geocoding: Google Geocoding API (city → lat/lng).
 """
 from __future__ import annotations
-import os, time, random
+import os
+import time
+import random
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 import httpx
 
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
