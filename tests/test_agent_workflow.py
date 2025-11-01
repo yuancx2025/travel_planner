@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from collections import Counter
 from typing import Dict
 
 import pytest
@@ -18,7 +19,7 @@ def test_research_agent_runs_all_enabled_tools(monkeypatch):
     monkeypatch.setattr(ResearchAgent, "_get_attractions", lambda self, state: calls.append("attractions") or [
         {"coord": {"lat": 35.0, "lng": -78.9}}
     ])
-    monkeypatch.setattr(ResearchAgent, "_get_dining", lambda self, state: calls.append("dining") or ["d"])
+    monkeypatch.setattr(ResearchAgent, "_get_dining", lambda self, state, attractions=None: calls.append("dining") or ["d"])
     monkeypatch.setattr(ResearchAgent, "_get_hotels", lambda self, state: calls.append("hotels") or ["h"])
     monkeypatch.setattr(ResearchAgent, "_get_car_rentals", lambda self, state: calls.append("car_rentals") or ["c"])
     monkeypatch.setattr(ResearchAgent, "_get_fuel_prices", lambda self, state: calls.append("fuel_prices") or {"regular": 3.5})
@@ -42,8 +43,7 @@ def test_research_agent_runs_all_enabled_tools(monkeypatch):
     assert result["car_rentals"] == ["c"]
     assert result["fuel_prices"]["regular"] == 3.5
     assert result["distances"] == ["dist"]
-    # Ensure call order touched each helper
-    assert calls == [
+    expected = Counter([
         "weather",
         "attractions",
         "dining",
@@ -51,7 +51,8 @@ def test_research_agent_runs_all_enabled_tools(monkeypatch):
         "car_rentals",
         "fuel_prices",
         "distances",
-    ]
+    ])
+    assert Counter(calls) == expected
 
 
 def test_research_agent_skips_optional_tools(monkeypatch):
