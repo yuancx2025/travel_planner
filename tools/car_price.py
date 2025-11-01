@@ -9,7 +9,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
-from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.gemini import GeminiModel as GoogleModel
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
