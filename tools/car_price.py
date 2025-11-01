@@ -9,9 +9,10 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
-from pydantic_ai.models.gemini import GeminiModel as GoogleModel
+from pydantic_ai.models.gemini import GeminiModel
 
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+# Support both GOOGLE_API_KEY (legacy) and GEMINI_API_KEY (new)
+GOOGLE_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
 class CarAndFuelPrices(BaseModel):
     """Combined car rental and fuel price response."""
@@ -50,27 +51,38 @@ class CarPriceError(Exception):
 # Legacy alias for backward compatibility
 FuelPriceError = CarPriceError
 
-model = GoogleModel("gemini-2.0-flash-exp")
+# Lazy initialization to avoid errors when module is imported in tests
+_model = None
+_agent = None
 
-agent = Agent(
-    model=model,
-    output_type=CarAndFuelPrices,
-    model_settings={
-        "tools": [{"google_search": {}}]  # Enable Google Search grounding
-    },
-    system_prompt=(
-        "You are a travel cost assistant. Use Google Search to find CURRENT pricing for:\n"
-        "1. Average gas/fuel prices (regular, midgrade, premium, diesel) in USD per gallon\n"
-        "2. Average car rental daily rates for different vehicle classes (economy, compact, midsize, SUV) in USD per day\n\n"
-        "Search for typical daily car rental rates from major providers (Enterprise, Hertz, Budget, Avis) "
-        "at the requested US location. Extract the 2-letter state code. "
-        "Return realistic market rates based on current search results."
-    ),
-)
+def _get_agent():
+    """Lazy agent initialization."""
+    global _model, _agent
+    if _agent is None:
+        if not GOOGLE_API_KEY:
+            raise CarPriceError("Missing GEMINI_API_KEY or GOOGLE_API_KEY environment variable")
+        _model = GeminiModel("gemini-2.0-flash-exp", api_key=GOOGLE_API_KEY)
+        _agent = Agent(
+            model=_model,
+            output_type=CarAndFuelPrices,
+            model_settings={
+                "tools": [{"google_search": {}}]  # Enable Google Search grounding
+            },
+            system_prompt=(
+                "You are a travel cost assistant. Use Google Search to find CURRENT pricing for:\n"
+                "1. Average gas/fuel prices (regular, midgrade, premium, diesel) in USD per gallon\n"
+                "2. Average car rental daily rates for different vehicle classes (economy, compact, midsize, SUV) in USD per day\n\n"
+                "Search for typical daily car rental rates from major providers (Enterprise, Hertz, Budget, Avis) "
+                "at the requested US location. Extract the 2-letter state code. "
+                "Return realistic market rates based on current search results."
+            ),
+        )
+    return _agent
 
 @lru_cache(maxsize=32)
 def _cached_query(location: str, hour_bucket: str) -> CarAndFuelPrices:
     """Cache results for 1 hour (keyed by hour bucket)."""
+    agent = _get_agent()
     result = agent.run_sync(
         f"What are the current average gas prices AND typical daily car rental rates in {location}, USA? "
         f"Include: (1) regular, midgrade, premium, and diesel fuel prices per gallon in USD, and "
@@ -87,7 +99,7 @@ def get_car_and_fuel_prices(location: str) -> dict:
         dict with fuel prices and car rental daily rates
     """
     if not GOOGLE_API_KEY:
-        raise CarPriceError("Missing GOOGLE_API_KEY or GEMINI_API_KEY")
+        raise CarPriceError("Missing GEMINI_API_KEY or GOOGLE_API_KEY")
 
     # Cache key includes hour to expire every 60 min
     hour_bucket = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H")
