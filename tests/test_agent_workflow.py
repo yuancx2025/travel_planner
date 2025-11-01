@@ -6,7 +6,6 @@ from datetime import datetime
 from collections import Counter
 from typing import Dict
 
-import pytest
 
 from agents.research_agent import ResearchAgent
 from tools import weather, distance_matrix, attractions

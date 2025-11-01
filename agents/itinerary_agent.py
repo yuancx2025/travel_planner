@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from tools import routes, streetview
 

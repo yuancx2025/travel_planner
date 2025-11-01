@@ -107,11 +107,10 @@ def get_fuel_prices(location: str) -> dict:
         dict with fuel prices (filters out car rental data)
     """
     full_data = get_car_and_fuel_prices(location)
-    # Filter to only fuel-related fields for backward compatibility
+    # Filter out car rental fields (ending in _daily and rental_unit)
     return {
         k: v for k, v in full_data.items()
-        if not k.endswith("_daily") or k in ["location", "state", "regular", "midgrade", "premium", 
-                                               "diesel", "currency", "fuel_unit", "source", "last_updated"]
+        if not k.endswith("_daily") and k != "rental_unit"
     }
 
 def get_state_gas_prices(state_code: str) -> dict:

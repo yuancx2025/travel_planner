@@ -314,32 +314,12 @@ class ResearchAgent:
             return [{"error": f"Hotels fetch failed: {e}"}]
 
     def _get_car_rentals(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Get car rentals (geocode city to lat/lng)."""
+        """Get car rentals and fuel prices for destination city."""
         try:
-            coords = self._geocode_city(state["destination_city"])
-            if not coords:
-                return [{"error": "Could not geocode destination for car rental"}]
-
-            checkin, checkout, _ = self._trip_window(state)
-            currency = state.get("currency", "USD") or "USD"
-            driver_age = state.get("driver_age")
-
-            return search_car_rentals(
-                pickup_lat=coords["lat"],
-                pickup_lon=coords["lng"],
-                pickup_date=checkin,
-                pickup_time="10:00",
-                dropoff_lat=coords["lat"],
-                dropoff_lon=coords["lng"],
-                dropoff_date=checkout,
-                dropoff_time="10:00",
-                currency_code=currency,
-                driver_age=self._safe_int(driver_age, 30) if driver_age else None,
-                language_code="en-us",
-                pickup_loc_name=f"{state['destination_city']} pickup",
-                dropoff_loc_name=f"{state['destination_city']} dropoff",
-                top_n=5
-            )
+            destination = state["destination_city"]
+            result = get_car_and_fuel_prices(location=destination)
+            # Wrap in list to match expected return type
+            return [result]
         except Exception as e:
             return [{"error": f"Car rental fetch failed: {e}"}]
 
