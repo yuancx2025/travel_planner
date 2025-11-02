@@ -333,65 +333,90 @@ class PlannerAgent:
 
 if __name__ == "__main__":
     """
-    Simple CLI for PlannerAgent.
+    Simple CLI wired up to the LangGraph runtime.
     Commands:
-      /state   -> show current state
-      /plan    -> get current plan
+      /state   -> show current serialized state
+      /plan    -> show the latest itinerary summary
       /reset   -> start over
       /quit    -> exit
     """
+    import asyncio
+    import json
+
+    from workflows.runtime import TravelPlannerRuntime
+    from workflows.state import TravelPlannerState
+
     if not os.getenv("GOOGLE_API_KEY"):
         print("❌ Missing GOOGLE_API_KEY. Set it first.")
         exit(1)
-    
-    planner = PlannerAgent()
-    print("🗺️  Travel Planner Agent")
-    print("=" * 60)
-    print("I'll help you plan your trip! Just chat naturally.\n")
-    print("Commands: /state, /plan, /reset, /quit\n")
-    
-    while True:
-        try:
-            user_input = input("You: ").strip()
-            
+
+    runtime = TravelPlannerRuntime()
+
+    async def main():
+        state = TravelPlannerState()
+
+        async def run_and_display(payload=None):
+            nonlocal state
+            state, _ = await runtime.run_turn(state, payload)
+            if state.last_agent_response:
+                print(f"\nPlanner: {state.last_agent_response}\n")
+            if state.phase == "awaiting_attraction_selection" and state.candidate_attractions:
+                print("🎯 Please choose attractions (comma-separated indices):")
+                for idx, attr in enumerate(state.candidate_attractions, 1):
+                    name = attr.get("name", "Attraction")
+                    rating = attr.get("rating")
+                    rating_text = f" – {rating}⭐" if rating else ""
+                    print(f"  {idx}. {name}{rating_text}")
+            elif state.phase == "awaiting_itinerary_approval":
+                print("✅ Approve the itinerary? (yes/no)")
+            elif state.phase == "awaiting_budget_confirmation":
+                print("✅ Approve the budget? (yes/no)")
+
+        await run_and_display("")
+
+        while True:
+            try:
+                user_input = input("You: ").strip()
+            except EOFError:
+                break
+
             if not user_input:
                 continue
-            
+
             if user_input == "/quit":
                 print("Goodbye! 👋")
                 break
-            
-            if user_input == "/state":
-                import json
-                print("\nCurrent State:")
-                print(json.dumps(planner.user_state, indent=2))
-                continue
-            
-            if user_input == "/plan":
-                plan = planner.get_plan()
-                if plan:
-                    print("\n" + plan["text"])
-                else:
-                    print("No plan generated yet. Complete the conversation first.")
-                continue
-            
+
             if user_input == "/reset":
-                planner.reset()
-                print("✓ Reset. Let's start fresh!\n")
+                state = TravelPlannerState()
+                await run_and_display("")
                 continue
-            
-            # Normal interaction
-            response = planner.interact(user_input)
-            print(f"\nAgent: {response['message']}\n")
-            
-            # If planning complete, show plan
-            if response["phase"] == "complete":
-                print("\n" + "="*60)
-                print("🎉 YOUR TRAVEL PLAN IS READY!")
-                print("="*60 + "\n")
-        
-        except KeyboardInterrupt:
-            print("\n\nGoodbye! 👋")
-            break
-        except Exception as e:
-            print(f"\n❌ Error: {e}\n")
+
+            if user_input == "/state":
+                print(json.dumps(state.model_dump(), indent=2))
+                continue
+
+            if user_input == "/plan":
+                if state.itinerary.get("days"):
+                    summary = "\n".join(
+                        f"Day {day.get('day', idx + 1)}: "
+                        + ", ".join(stop.get("name", "Attraction") for stop in day.get("stops", []))
+                        for idx, day in enumerate(state.itinerary.get("days", []))
+                    )
+                    print(f"\n{summary}\n")
+                else:
+                    print("No itinerary yet. Continue the flow first.")
+                continue
+
+            if state.phase == "awaiting_attraction_selection":
+                indices = [int(part) - 1 for part in user_input.split(",") if part.strip().isdigit()]
+                await run_and_display({"selected_indices": indices})
+                continue
+
+            if state.phase in {"awaiting_itinerary_approval", "awaiting_budget_confirmation"}:
+                await run_and_display(user_input)
+                continue
+
+            await run_and_display(user_input)
+
+    asyncio.run(main())
