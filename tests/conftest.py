@@ -37,3 +37,5 @@ def fake_response():
         return FakeResponse(payload, status_code=status_code, headers=headers)
 
     return _factory
+
+    
