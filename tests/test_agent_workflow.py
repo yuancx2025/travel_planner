@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from collections import Counter
+from datetime import datetime
 from typing import Dict
 
-import pytest
-
 from agents.research_agent import ResearchAgent
-from tools import weather, distance_matrix, attractions
+from tools import attractions, distance_matrix, weather
 
 
 def test_research_agent_runs_all_enabled_tools(monkeypatch):

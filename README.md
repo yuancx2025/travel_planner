@@ -12,7 +12,6 @@ pip install -r requirements.txt
 cat > .env << EOF
 GOOGLE_MAPS_API_KEY=your_key_here
 GOOGLE_API_KEY=your_gemini_key_here
-RAPIDAPI_KEY=your_rapidapi_key_here
 AMADEUS_API_KEY=your_amadeus_key_here
 AMADEUS_API_SECRET=your_amadeus_secret_here
 EOF
@@ -50,9 +49,15 @@ cars = search_car_rentals(
     dropoff_date="2024-12-23", dropoff_time="10:00"
 )
 
-# Fuel Prices
-from tools.fuel_price import get_fuel_prices
-prices = get_fuel_prices("California")
+# Fuel Prices & Car Rental Rates (combined Gemini query)
+from tools.car_price import get_car_and_fuel_prices
+prices = get_car_and_fuel_prices("California")
+# Returns: {location, state, regular, midgrade, premium, diesel, 
+#           economy_car_daily, compact_car_daily, midsize_car_daily, suv_daily, ...}
+
+# Legacy fuel-only function (backward compatible)
+from tools.car_price import get_fuel_prices
+fuel_only = get_fuel_prices("California")  # Filters out car rental data
 
 # Distance Matrix
 from tools.distance_matirx import get_distance_matrix
@@ -123,10 +128,17 @@ search_car_rentals(
 → List[Dict]  # [{provider, vehicle_type, price, currency}, ...]
 ```
 
-### Fuel Prices
+### Fuel Prices & Car Rental Rates (Combined)
 ```python
-get_fuel_prices(location: str)  # US state or city
-→ Dict  # {location, regular, premium, diesel, unit, source, timestamp}
+# New combined function (recommended)
+get_car_and_fuel_prices(location: str)  # US state or city
+→ Dict  # {location, state, regular, midgrade, premium, diesel,
+        #  economy_car_daily, compact_car_daily, midsize_car_daily, suv_daily,
+        #  currency, fuel_unit, rental_unit, source, last_updated}
+
+# Legacy fuel-only function (backward compatible)
+get_fuel_prices(location: str)  # Filters out car rental data
+→ Dict  # {location, state, regular, midgrade, premium, diesel, ...}
 ```
 
 ### Distance Matrix
@@ -139,5 +151,4 @@ get_distance_matrix(origins: List[str], destinations: List[str], mode: str = "DR
 
 - **Google Maps**: https://console.cloud.google.com/apis/credentials
 - **Gemini**: https://aistudio.google.com/app/apikey
-- **RapidAPI**: https://rapidapi.com/hub (search "booking-com-api5")
 - **Amadeus**: https://developers.amadeus.com/get-started/get-started-with-self-service-apis

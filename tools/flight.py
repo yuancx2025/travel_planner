@@ -1,6 +1,7 @@
 # tools/flight.py
 
 import os
+
 from amadeus import Client, ResponseError
 from dotenv import load_dotenv
 
