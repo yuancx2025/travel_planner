@@ -32,9 +32,10 @@ agents/ • tools/ • workflows/ • tests/ • app.py • requirements.txt •
 - Translate legacy/LangChain tutorials to LangGraph + Pydantic‑AI + google‑generativeai style.
 
 ## Contracts (do not break)
-- Tools: weather_v2, attractions, dining, hotels, car_rental, fuel_price, distance_matrix (repo file may be named distance_matirx.py).
+- Tools: weather_v2, attractions, dining, hotels, car_rental, car_price (combines fuel_price + car rental daily rates), distance_matrix (repo file may be named distance_matirx.py).
 - Return keys must stay: weather, attractions, dining, hotels, car_rentals, fuel_prices, distances.
-- Normalize items: {id?, name?, price?, coord?, source, raw} with source ∈ {google, amadeus, rapidapi, open-meteo}.
+- fuel_prices now contains BOTH fuel prices AND car rental daily rates: {location, state, regular, midgrade, premium, diesel, economy_car_daily?, compact_car_daily?, midsize_car_daily?, suv_daily?, ...}.
+- Normalize items: {id?, name?, price?, coord?, source, raw} with source ∈ {google, amadeus, rapidapi, open-meteo, google_search}.
 
 ## Tool/API rules
 - httpx: timeout ≤ 20s; exponential backoff (tenacity) on 429/5xx.

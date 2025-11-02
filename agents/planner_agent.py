@@ -4,20 +4,19 @@ PlannerAgent: Orchestrates ChatAgent → ResearchAgent → Travel Plan.
 High-level coordinator that manages the conversation → research → planning workflow.
 """
 from __future__ import annotations
-import math
-import os
-from typing import Any, Dict, List, Optional, Generator
-from datetime import datetime
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+import os
+from datetime import datetime
+from typing import Any, Dict, Generator, List, Optional
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from prompts import load_prompt_template
 
 from agents.chat_agent import ChatAgent
-from agents.research_agent import ResearchAgent
 from agents.itinerary_agent import ItineraryAgent
-from agents.budget_agent import BudgetAgent
+from agents.research_agent import ResearchAgent
 
 
 class AttractionSelectionAgent:
@@ -240,7 +239,7 @@ class PlannerAgent:
                 "state": self.user_state,
                 "plan": None,
             }
-        
+
         context = self.itinerary_agent.build_planning_context(
             self.user_state,
             self.research_results,
@@ -248,13 +247,13 @@ class PlannerAgent:
             self.itinerary_summary.get("budget") if self.itinerary_summary else None,
             self.selected_attractions,
         )
-        
+
         # Generate plan
         final_plan_template = load_prompt_template("final_plan", "final_plan.md")
         system_msg = SystemMessage(content=final_plan_template.format())
         
         user_msg = HumanMessage(content=context)
-        
+
         try:
             response = self.planner_model.invoke([system_msg, user_msg])
             plan_text = response.content
@@ -294,13 +293,13 @@ class PlannerAgent:
         """Convert streaming response to text."""
         if stream is None:
             return ""
-        
+
         try:
             chunks = []
             for chunk in stream:
                 if hasattr(chunk, "content"):
                     chunks.append(chunk.content)
-            
+
             # Save to chat history
             full_text = "".join(chunks)
             self.chat_agent.conversation_history.append(AIMessage(content=full_text))
@@ -324,63 +323,71 @@ class PlannerAgent:
 
 if __name__ == "__main__":
     """
-    Simple CLI for PlannerAgent.
+    Simple CLI wired up to the LangGraph runtime.
     Commands:
-      /state   -> show current state
-      /plan    -> get current plan
+      /state   -> show current serialized state
+      /plan    -> show the latest itinerary summary
       /reset   -> start over
       /quit    -> exit
     """
+    import asyncio
+    import json
+
+    from workflows.runtime import TravelPlannerRuntime
+    from workflows.state import TravelPlannerState
+
     if not os.getenv("GOOGLE_API_KEY"):
         print("❌ Missing GOOGLE_API_KEY. Set it first.")
         exit(1)
-    
+
     planner = PlannerAgent()
     print("🗺️  Travel Planner Agent")
     print("=" * 60)
     print("I'll help you plan your trip! Just chat naturally.\n")
     print("Commands: /state, /plan, /reset, /quit\n")
-    
+
     while True:
         try:
             user_input = input("You: ").strip()
-            
+
             if not user_input:
                 continue
-            
+
             if user_input == "/quit":
                 print("Goodbye! 👋")
                 break
-            
+
             if user_input == "/state":
-                import json
-                print("\nCurrent State:")
-                print(json.dumps(planner.user_state, indent=2))
+                print(json.dumps(state.model_dump(), indent=2))
                 continue
-            
+
             if user_input == "/plan":
-                plan = planner.get_plan()
-                if plan:
-                    print("\n" + plan["text"])
+                if state.itinerary.get("days"):
+                    summary = "\n".join(
+                        f"Day {day.get('day', idx + 1)}: "
+                        + ", ".join(stop.get("name", "Attraction") for stop in day.get("stops", []))
+                        for idx, day in enumerate(state.itinerary.get("days", []))
+                    )
+                    print(f"\n{summary}\n")
                 else:
-                    print("No plan generated yet. Complete the conversation first.")
+                    print("No itinerary yet. Continue the flow first.")
                 continue
-            
+
             if user_input == "/reset":
                 planner.reset()
                 print("✓ Reset. Let's start fresh!\n")
                 continue
-            
+
             # Normal interaction
             response = planner.interact(user_input)
             print(f"\nAgent: {response['message']}\n")
-            
+
             # If planning complete, show plan
             if response["phase"] == "complete":
                 print("\n" + "="*60)
                 print("🎉 YOUR TRAVEL PLAN IS READY!")
                 print("="*60 + "\n")
-        
+
         except KeyboardInterrupt:
             print("\n\nGoodbye! 👋")
             break

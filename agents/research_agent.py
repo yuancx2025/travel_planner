@@ -1,19 +1,20 @@
 # agents/research_agent.py
 """ResearchAgent: Tool coordinator for travel research."""
 from __future__ import annotations
-import os
+
 import asyncio
-from typing import Any, Dict, List, Optional, Tuple
+import os
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_exponential
 
-from tools.weather import get_weather
 from tools.attractions import search_attractions
-from tools.dining import search_restaurants
-from tools.hotels import search_hotels_by_city
-from tools.distance_matrix import get_distance_matrix
 from tools.car_price import get_car_and_fuel_prices
+from tools.dining import search_restaurants
+from tools.distance_matrix import get_distance_matrix
+from tools.hotels import search_hotels_by_city
+from tools.weather import get_weather
 
 
 class ResearchAgent:
@@ -31,7 +32,7 @@ class ResearchAgent:
             missing.append("RAPIDAPI_KEY (for car rentals)")
         if not os.getenv("AMADEUS_API_KEY") or not os.getenv("AMADEUS_API_SECRET"):
             missing.append("AMADEUS_API_KEY/SECRET (for hotels)")
-        
+
         if missing:
             print(f"⚠️  Warning: Missing API keys: {', '.join(missing)}")
 
@@ -314,32 +315,12 @@ class ResearchAgent:
             return [{"error": f"Hotels fetch failed: {e}"}]
 
     def _get_car_rentals(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Get car rentals (geocode city to lat/lng)."""
+        """Get car rentals and fuel prices for destination city."""
         try:
-            coords = self._geocode_city(state["destination_city"])
-            if not coords:
-                return [{"error": "Could not geocode destination for car rental"}]
-
-            checkin, checkout, _ = self._trip_window(state)
-            currency = state.get("currency", "USD") or "USD"
-            driver_age = state.get("driver_age")
-
-            return search_car_rentals(
-                pickup_lat=coords["lat"],
-                pickup_lon=coords["lng"],
-                pickup_date=checkin,
-                pickup_time="10:00",
-                dropoff_lat=coords["lat"],
-                dropoff_lon=coords["lng"],
-                dropoff_date=checkout,
-                dropoff_time="10:00",
-                currency_code=currency,
-                driver_age=self._safe_int(driver_age, 30) if driver_age else None,
-                language_code="en-us",
-                pickup_loc_name=f"{state['destination_city']} pickup",
-                dropoff_loc_name=f"{state['destination_city']} dropoff",
-                top_n=5
-            )
+            destination = state["destination_city"]
+            result = get_car_and_fuel_prices(location=destination)
+            # Wrap in list to match expected return type
+            return [result]
         except Exception as e:
             return [{"error": f"Car rental fetch failed: {e}"}]
 
