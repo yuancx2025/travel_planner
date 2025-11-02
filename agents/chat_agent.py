@@ -1,9 +1,9 @@
-import os
 import json
+import os
 import re
-from typing import Generator, Dict, Any, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from prompts import PromptTemplate, load_prompt_template
@@ -296,7 +296,9 @@ if __name__ == "__main__":
       /help       -> show commands
       /quit       -> exit
     """
-    import sys, json, pathlib
+    import json
+    import pathlib
+    import sys
 
     # 1) init the agent (uses your default gemini model)
     agent = ChatAgent()
