@@ -333,13 +333,19 @@ class PlannerAgent:
 
 if __name__ == "__main__":
     """
-    Simple CLI for PlannerAgent.
+    Simple CLI wired up to the LangGraph runtime.
     Commands:
-      /state   -> show current state
-      /plan    -> get current plan
+      /state   -> show current serialized state
+      /plan    -> show the latest itinerary summary
       /reset   -> start over
       /quit    -> exit
     """
+    import asyncio
+    import json
+
+    from workflows.runtime import TravelPlannerRuntime
+    from workflows.state import TravelPlannerState
+
     if not os.getenv("GOOGLE_API_KEY"):
         print("❌ Missing GOOGLE_API_KEY. Set it first.")
         exit(1)
@@ -362,17 +368,19 @@ if __name__ == "__main__":
                 break
 
             if user_input == "/state":
-                import json
-                print("\nCurrent State:")
-                print(json.dumps(planner.user_state, indent=2))
+                print(json.dumps(state.model_dump(), indent=2))
                 continue
 
             if user_input == "/plan":
-                plan = planner.get_plan()
-                if plan:
-                    print("\n" + plan["text"])
+                if state.itinerary.get("days"):
+                    summary = "\n".join(
+                        f"Day {day.get('day', idx + 1)}: "
+                        + ", ".join(stop.get("name", "Attraction") for stop in day.get("stops", []))
+                        for idx, day in enumerate(state.itinerary.get("days", []))
+                    )
+                    print(f"\n{summary}\n")
                 else:
-                    print("No plan generated yet. Complete the conversation first.")
+                    print("No itinerary yet. Continue the flow first.")
                 continue
 
             if user_input == "/reset":
