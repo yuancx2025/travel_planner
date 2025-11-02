@@ -12,7 +12,8 @@ from typing import Any, Dict, Generator, List, Optional
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from agents.budget_agent import BudgetAgent
+from prompts import load_prompt_template
+
 from agents.chat_agent import ChatAgent
 from agents.itinerary_agent import ItineraryAgent
 from agents.research_agent import ResearchAgent
@@ -248,20 +249,9 @@ class PlannerAgent:
         )
 
         # Generate plan
-        system_msg = SystemMessage(content=(
-            "You are a professional travel planner. Based on the user's preferences and research results, "
-            "create a detailed, day-by-day travel itinerary. Be specific, mention actual places, "
-            "and provide practical tips. Format your response in clear sections:\n"
-            "1. Trip Overview\n"
-            "2. Weather & Packing Suggestions\n"
-            "3. Day-by-Day Itinerary\n"
-            "4. Dining Recommendations\n"
-            "5. Accommodation Options\n"
-            "6. Transportation\n"
-            "7. Budget Summary\n"
-            "Keep it concise but informative."
-        ))
-
+        final_plan_template = load_prompt_template("final_plan", "final_plan.md")
+        system_msg = SystemMessage(content=final_plan_template.format())
+        
         user_msg = HumanMessage(content=context)
 
         try:
