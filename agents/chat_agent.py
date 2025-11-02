@@ -6,6 +6,8 @@ from typing import Any, Dict, Generator, List, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+from prompts import PromptTemplate, load_prompt_template
+
 if not os.getenv("GOOGLE_API_KEY"):
     raise EnvironmentError("Missing GOOGLE_API_KEY. Run: export GOOGLE_API_KEY='your_key_here'")
 
@@ -19,8 +21,17 @@ class ChatAgent:
     - never calls external tools (gather-only).
     """
 
-    def __init__(self, model_name: str = "gemini-2.0-flash", temperature: float = 0.2, model=None):
+    def __init__(
+        self,
+        model_name: str = "gemini-2.0-flash",
+        temperature: float = 0.2,
+        model=None,
+        intake_prompt: Optional[PromptTemplate] = None,
+        extraction_prompt: Optional[PromptTemplate] = None,
+    ):
         self.model = model if model is not None else ChatGoogleGenerativeAI(model=model_name, temperature=temperature, streaming=True)
+        self.intake_prompt_template = intake_prompt or load_prompt_template("intake", "intake.md")
+        self.extraction_prompt_template = extraction_prompt or load_prompt_template("extract_preferences", "extract_preferences.md")
 
         # === REQUIRED FIELDS (aligned with your 8 steps) ===
         self.required_fields: List[str] = [
@@ -52,25 +63,15 @@ class ChatAgent:
     # ---------------------------
     def _init_system_message(self) -> SystemMessage:
         """One concise directive the model will follow for the whole chat."""
-        return SystemMessage(
-            content=(
-                "You are a friendly US travel intake assistant. "
-                "Your job is to gather the user's trip preferences in a natural, conversational way. "
-                "Do NOT book or search anything. Only collect information.\n\n"
-                "Required fields you must help the user fill (in a friendly way):\n"
-                "1) name\n"
-                "2) destination_city (their preferred city)\n"
-                "3) travel_days and start_date (YYYY-MM-DD; if not known, user can say 'not decided')\n"
-                "4) budget_usd (numeric)\n"
-                "5) num_people and kids (yes/no or a count)\n"
-                "6) activity_pref ('outdoor' or 'indoor'), need_car_rental (yes/no), hotel_room_pref (e.g., '1 king')\n"
-                "7) cuisine_pref (e.g., 'ramen', 'vegan', 'seafood', 'kid-friendly')\n"
-                "8) Summarize and confirm. Do not hand off to other agents.\n\n"
-                "Also capture optional fields if mentioned: origin_city, home_airport, specific_requirements "
-                "(e.g., accessibility, dietary restrictions, special constraints). "
-                "Always acknowledge information already provided; ask one or two natural questions at a time."
-            )
+        required_bullets = "\n".join(
+            f"- {idx + 1}) {field}" for idx, field in enumerate(self.required_fields)
         )
+        optional_bullets = "\n".join(f"- {field}" for field in self.optional_fields)
+        prompt_text = self.intake_prompt_template.format(
+            required_fields_bullets=required_bullets,
+            optional_fields_bullets=optional_bullets,
+        )
+        return SystemMessage(content=prompt_text)
 
     # ---------------------------
     # Public API: main entrypoint
@@ -146,31 +147,12 @@ class ChatAgent:
         Use an LLM to extract ALL relevant fields from arbitrary user text.
         No regexes or hard-coded parsing — model-only extraction to JSON.
         """
-        system_prompt = f"""
-        Extract the user's travel details and return a SINGLE JSON object with these keys:
-        {', '.join([f'"{f}"' for f in self.all_fields])}
-
-        Rules:
-        - If a field isn't mentioned, set it to "" (empty string).
-        - name: string (first name is fine).
-        - destination_city: city name string.
-        - travel_days: integer if clear; else "".
-        - start_date: if provided, format YYYY-MM-DD; if unclear/unknown/not provided, set to "not decided".
-        - budget_usd: numeric (strip $ and commas). If unclear, "".
-        - num_people: integer if clear; else "".
-        - kids: "yes" | "no" | integer count | "". If user says "no kids" or "all adults", set "no".
-        - activity_pref: "outdoor" | "indoor" | "" (pick the dominant preference if clearly stated).
-        - need_car_rental: "yes" | "no" | "" (keep as string for downstream UI).
-        - hotel_room_pref: short text like "1 king", "2 queens", "suite" if explicitly mentioned; else "".
-        - cuisine_pref: short text (e.g., "ramen", "vegan", "seafood", "kid-friendly") if mentioned; else "".
-        - origin_city, home_airport are optional; fill only if clearly present; otherwise "".
-        - specific_requirements: any accessibility needs, dietary restrictions, constraints, or special requests; else "".
-
-        Current known state (may be partial, use it to stay consistent but do NOT hallucinate):
-        {json.dumps(current_state, ensure_ascii=False)}
-
-        Output format requirement: Return ONLY the JSON object, with no code fences, no markdown, and no extra text.
-        """
+        field_list = "\n".join(f"- \"{f}\"" for f in self.all_fields)
+        current_state_json = json.dumps(current_state, ensure_ascii=False, indent=2)
+        system_prompt = self.extraction_prompt_template.format(
+            field_list=field_list,
+            current_state=current_state_json,
+        )
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=message)
