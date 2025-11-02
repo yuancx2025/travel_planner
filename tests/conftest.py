@@ -7,10 +7,10 @@ from typing import Any, Dict
 
 import pytest
 
-
 # Ensure placeholder keys exist so modules that read env on import succeed.
 os.environ.setdefault("GOOGLE_MAPS_API_KEY", "test-maps-key")
 os.environ.setdefault("GOOGLE_API_KEY", "test-google-key")
+os.environ.setdefault("GEMINI_API_KEY", "test-gemini-key")
 os.environ.setdefault("AMADEUS_API_KEY", "test-amadeus-key")
 os.environ.setdefault("AMADEUS_API_SECRET", "test-amadeus-secret")
 os.environ.setdefault("RAPIDAPI_KEY", "x" * 40)
@@ -37,3 +37,5 @@ def fake_response():
         return FakeResponse(payload, status_code=status_code, headers=headers)
 
     return _factory
+
+    

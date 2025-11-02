@@ -4,18 +4,18 @@ PlannerAgent: Orchestrates ChatAgent → ResearchAgent → Travel Plan.
 High-level coordinator that manages the conversation → research → planning workflow.
 """
 from __future__ import annotations
-import math
-import os
-from typing import Any, Dict, List, Optional, Generator
-from datetime import datetime
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+import os
+from datetime import datetime
+from typing import Any, Dict, Generator, List, Optional
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from agents.chat_agent import ChatAgent
-from agents.research_agent import ResearchAgent
-from agents.itinerary_agent import ItineraryAgent
 from agents.budget_agent import BudgetAgent
+from agents.chat_agent import ChatAgent
+from agents.itinerary_agent import ItineraryAgent
+from agents.research_agent import ResearchAgent
 
 
 class AttractionSelectionAgent:
@@ -238,7 +238,7 @@ class PlannerAgent:
                 "state": self.user_state,
                 "plan": None,
             }
-        
+
         context = self.itinerary_agent.build_planning_context(
             self.user_state,
             self.research_results,
@@ -246,7 +246,7 @@ class PlannerAgent:
             self.itinerary_summary.get("budget") if self.itinerary_summary else None,
             self.selected_attractions,
         )
-        
+
         # Generate plan
         system_msg = SystemMessage(content=(
             "You are a professional travel planner. Based on the user's preferences and research results, "
@@ -261,9 +261,9 @@ class PlannerAgent:
             "7. Budget Summary\n"
             "Keep it concise but informative."
         ))
-        
+
         user_msg = HumanMessage(content=context)
-        
+
         try:
             response = self.planner_model.invoke([system_msg, user_msg])
             plan_text = response.content
@@ -303,13 +303,13 @@ class PlannerAgent:
         """Convert streaming response to text."""
         if stream is None:
             return ""
-        
+
         try:
             chunks = []
             for chunk in stream:
                 if hasattr(chunk, "content"):
                     chunks.append(chunk.content)
-            
+
             # Save to chat history
             full_text = "".join(chunks)
             self.chat_agent.conversation_history.append(AIMessage(content=full_text))
@@ -350,35 +350,15 @@ if __name__ == "__main__":
         print("❌ Missing GOOGLE_API_KEY. Set it first.")
         exit(1)
 
-    runtime = TravelPlannerRuntime()
+    planner = PlannerAgent()
+    print("🗺️  Travel Planner Agent")
+    print("=" * 60)
+    print("I'll help you plan your trip! Just chat naturally.\n")
+    print("Commands: /state, /plan, /reset, /quit\n")
 
-    async def main():
-        state = TravelPlannerState()
-
-        async def run_and_display(payload=None):
-            nonlocal state
-            state, _ = await runtime.run_turn(state, payload)
-            if state.last_agent_response:
-                print(f"\nPlanner: {state.last_agent_response}\n")
-            if state.phase == "awaiting_attraction_selection" and state.candidate_attractions:
-                print("🎯 Please choose attractions (comma-separated indices):")
-                for idx, attr in enumerate(state.candidate_attractions, 1):
-                    name = attr.get("name", "Attraction")
-                    rating = attr.get("rating")
-                    rating_text = f" – {rating}⭐" if rating else ""
-                    print(f"  {idx}. {name}{rating_text}")
-            elif state.phase == "awaiting_itinerary_approval":
-                print("✅ Approve the itinerary? (yes/no)")
-            elif state.phase == "awaiting_budget_confirmation":
-                print("✅ Approve the budget? (yes/no)")
-
-        await run_and_display("")
-
-        while True:
-            try:
-                user_input = input("You: ").strip()
-            except EOFError:
-                break
+    while True:
+        try:
+            user_input = input("You: ").strip()
 
             if not user_input:
                 continue
@@ -386,11 +366,6 @@ if __name__ == "__main__":
             if user_input == "/quit":
                 print("Goodbye! 👋")
                 break
-
-            if user_input == "/reset":
-                state = TravelPlannerState()
-                await run_and_display("")
-                continue
 
             if user_input == "/state":
                 print(json.dumps(state.model_dump(), indent=2))
@@ -408,15 +383,23 @@ if __name__ == "__main__":
                     print("No itinerary yet. Continue the flow first.")
                 continue
 
-            if state.phase == "awaiting_attraction_selection":
-                indices = [int(part) - 1 for part in user_input.split(",") if part.strip().isdigit()]
-                await run_and_display({"selected_indices": indices})
+            if user_input == "/reset":
+                planner.reset()
+                print("✓ Reset. Let's start fresh!\n")
                 continue
 
-            if state.phase in {"awaiting_itinerary_approval", "awaiting_budget_confirmation"}:
-                await run_and_display(user_input)
-                continue
+            # Normal interaction
+            response = planner.interact(user_input)
+            print(f"\nAgent: {response['message']}\n")
 
-            await run_and_display(user_input)
+            # If planning complete, show plan
+            if response["phase"] == "complete":
+                print("\n" + "="*60)
+                print("🎉 YOUR TRAVEL PLAN IS READY!")
+                print("="*60 + "\n")
 
-    asyncio.run(main())
+        except KeyboardInterrupt:
+            print("\n\nGoodbye! 👋")
+            break
+        except Exception as e:
+            print(f"\n❌ Error: {e}\n")
