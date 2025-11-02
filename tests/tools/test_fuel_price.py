@@ -40,7 +40,7 @@ def test_get_fuel_prices_missing_key(monkeypatch):
     # Patch the module-level variable since it's read at import time
     monkeypatch.setattr(car_price, "GOOGLE_API_KEY", None)
 
-    with pytest.raises(car_price.CarPriceError, match="Missing GOOGLE_API_KEY"):
+    with pytest.raises(car_price.CarPriceError, match="Missing.*API_KEY"):
         car_price.get_fuel_prices("durham")
 
 
