@@ -86,6 +86,11 @@ class BudgetAgent:
 
         total_distance_m = 0.0
         for day in itinerary.get("days", []):
+            route_distance = self._route_distance(day.get("route"))
+            if route_distance > 0:
+                total_distance_m += route_distance
+                continue
+
             coords = [self._coord_tuple(stop.get("coord")) for stop in day.get("stops", [])]
             coords = [c for c in coords if c]
             total_distance_m += self._sum_route_distance(coords)
@@ -96,6 +101,26 @@ class BudgetAgent:
         miles = total_distance_m / 1609.344
         gallons = miles / self.fuel_efficiency_mpg
         return max(0.0, round(gallons * price_per_gallon, 2))
+
+    def _route_distance(self, route: Optional[Dict[str, Any]]) -> float:
+        if not route:
+            return 0.0
+
+        distance = self._to_float(route.get("distance_m"), default=0.0)
+        if distance > 0:
+            return distance
+
+        legs = route.get("legs") if isinstance(route, dict) else None
+        if isinstance(legs, Sequence):
+            leg_total = 0.0
+            for leg in legs:
+                if not isinstance(leg, dict):
+                    continue
+                leg_total += self._to_float(leg.get("distance_m"), default=0.0)
+            if leg_total > 0:
+                return leg_total
+
+        return 0.0
 
     def _sum_route_distance(self, coords: Sequence[Optional[Tuple[float, float]]]) -> float:
         total = 0.0

@@ -12,11 +12,11 @@ from typing import Any, Dict, Generator, List, Optional
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from prompts import load_prompt_template
-
+from agents.budget_agent import BudgetAgent
 from agents.chat_agent import ChatAgent
 from agents.itinerary_agent import ItineraryAgent
 from agents.research_agent import ResearchAgent
+from prompts import load_prompt_template
 
 
 class AttractionSelectionAgent:
@@ -330,11 +330,8 @@ if __name__ == "__main__":
       /reset   -> start over
       /quit    -> exit
     """
-    import asyncio
     import json
 
-    from workflows.runtime import TravelPlannerRuntime
-    from workflows.state import TravelPlannerState
 
     if not os.getenv("GOOGLE_API_KEY"):
         print("❌ Missing GOOGLE_API_KEY. Set it first.")
@@ -358,19 +355,15 @@ if __name__ == "__main__":
                 break
 
             if user_input == "/state":
-                print(json.dumps(state.model_dump(), indent=2))
+                print(json.dumps(planner.user_state, indent=2))
                 continue
 
             if user_input == "/plan":
-                if state.itinerary.get("days"):
-                    summary = "\n".join(
-                        f"Day {day.get('day', idx + 1)}: "
-                        + ", ".join(stop.get("name", "Attraction") for stop in day.get("stops", []))
-                        for idx, day in enumerate(state.itinerary.get("days", []))
-                    )
-                    print(f"\n{summary}\n")
+                plan = planner.get_plan()
+                if plan:
+                    print(f"\n{plan}\n")
                 else:
-                    print("No itinerary yet. Continue the flow first.")
+                    print("No plan generated yet. Complete the conversation first.")
                 continue
 
             if user_input == "/reset":

@@ -27,6 +27,8 @@ class TravelPlannerState(BaseModel):
     thread_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     conversation_turns: List[ConversationTurn] = Field(default_factory=list)
     preferences: PreferencesState = Field(default_factory=PreferencesState)
+    preferences_signature: Optional[str] = None
+    research_preferences_signature: Optional[str] = None
     research: Dict[str, Any] = Field(default_factory=dict)
     candidate_attractions: List[Dict[str, Any]] = Field(default_factory=list)
     selected_attractions: List[Dict[str, Any]] = Field(default_factory=list)

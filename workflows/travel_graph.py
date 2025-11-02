@@ -1,12 +1,22 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+import hashlib
+import json
+from typing import Any, Dict, Iterable, List, Sequence
 
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from workflows.state import PreferencesState, TravelPlannerState
+
+
+def _preferences_signature(data: Dict[str, Any]) -> str:
+    try:
+        payload = json.dumps(data, sort_keys=True, default=str, separators=(",", ":"))
+    except TypeError:
+        payload = str(sorted(data.items()))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _stream_to_text(stream: Any) -> str:
@@ -105,7 +115,8 @@ def build_travel_planner_graph(
             return state.model_dump()
 
         input_text = user_input or ""
-        result = chat_agent.collect_info(input_text, state.preferences.fields.copy())
+        current_fields = state.preferences.fields.copy()
+        result = chat_agent.collect_info(input_text, current_fields)
         response_text = _stream_to_text(result.get("stream"))
         if response_text:
             chat_agent.conversation_history.append(AIMessage(content=response_text))
@@ -113,12 +124,31 @@ def build_travel_planner_graph(
         if result.get("error") and not response_text:
             state.push_agent_turn(f"⚠️ {result['error']}")
 
+        raw_fields = result.get("state", state.preferences.fields)
+        if isinstance(raw_fields, dict):
+            new_fields = dict(raw_fields)
+        else:
+            new_fields = dict(state.preferences.fields)
         prefs = PreferencesState(
-            fields=result.get("state", state.preferences.fields),
+            fields=new_fields,
             missing_fields=result.get("missing_fields", []),
             complete=bool(result.get("complete")),
         )
+        new_signature = _preferences_signature(new_fields)
+        signature_changed = new_signature != state.preferences_signature
+
+        if signature_changed:
+            state.research = {}
+            state.research_preferences_signature = None
+            state.candidate_attractions = []
+            state.selected_attractions = []
+            state.itinerary = {}
+            state.itinerary_approved = False
+            state.budget = {}
+            state.budget_confirmed = False
+
         state.preferences = prefs
+        state.preferences_signature = new_signature
         state.pending_user_input = None
         state.phase = "researching" if prefs.complete else "awaiting_user_input"
         return state.model_dump()
@@ -128,10 +158,22 @@ def build_travel_planner_graph(
             state.phase = "awaiting_user_input"
             return state.model_dump()
 
+        if (
+            state.research
+            and state.research_preferences_signature == state.preferences_signature
+        ):
+            state.phase = (
+                "awaiting_attraction_selection"
+                if state.candidate_attractions
+                else "building_itinerary"
+            )
+            return state.model_dump()
+
         results = research_agent.research(state.preferences.fields)
         state.research = results or {}
         state.candidate_attractions = list((results or {}).get("attractions") or [])
         state.selected_attractions = []
+        state.research_preferences_signature = state.preferences_signature
 
         summary = _format_attraction_summary(state.candidate_attractions)
         if summary:
