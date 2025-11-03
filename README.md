@@ -1,15 +1,22 @@
-# Quick Start Guide
+# Travel Planner
+
+## 🧭 System Overview
+
+- **Streamlit UI (`streamlit_app.py`)** – provides the chat interface and calls the backend over HTTP using the session ID stored in `st.session_state`.
+- **FastAPI backend (`api/main.py`)** – exposes `/sessions` and `/sessions/{id}/turns` endpoints, forwarding every turn to the runtime and returning updated state plus any human-in-the-loop interrupts.
+- **LangGraph runtime (`workflows/runtime.py`)** – owns the long-lived `TravelPlannerState`, replays the compiled `travel_graph` workflow, and checkpoints progress with `MemorySaver` so steps can resume after an interrupt.
+- **Agents & tools (`agents/`, `tools/`)** – specialized components that gather preferences (chat), research data (weather, attractions, dining, hotels, car + fuel, distances), craft itineraries, and estimate budgets.
 
 ## 🚀 Running the Travel Planning Agent
 
 ### 1. Setup (One-time)
 ```bash
-# Clone and install
+# Clone and install deps
 cd 590_project
 pip install -r requirements.txt
 
-# Add API keys to .env
-cat > .env << EOF
+# Add API keys to .env (or set in your shell / Secret Manager)
+cat > .env <<'EOF'
 GOOGLE_MAPS_API_KEY=your_key_here
 GOOGLE_API_KEY=your_gemini_key_here
 AMADEUS_API_KEY=your_amadeus_key_here
@@ -17,15 +24,28 @@ AMADEUS_API_SECRET=your_amadeus_secret_here
 EOF
 ```
 
-### 2. Run Streamlit App (will implement later)
+### 2. Run the FastAPI backend
 ```bash
-streamlit run app.py
+uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 3. Test Individual Tools
+Expose required API keys as environment variables before launching the service.
+
+### 3. Run the Streamlit front end
+```bash
+export TRAVEL_PLANNER_API_URL="http://localhost:8000"
+streamlit run streamlit_app.py
+```
+
+### 4. Run the automated tests
+```bash
+pytest -v
+```
+
+### 5. Test Individual Tools
 ```python
 # Weather
-from tools.weather_v2 import get_weather
+from tools.weather import get_weather
 weather = get_weather("Paris", "2024-12-25", 3)
 
 # Attractions
@@ -40,15 +60,6 @@ food = search_restaurants(35.6762, 139.6503, radius=2000, keyword="ramen")
 from tools.hotels import search_hotels_by_city
 hotels = search_hotels_by_city("LON", "2024-12-20", "2024-12-23")
 
-# Car Rentals (NEW: requires lat/lng!)
-from tools.car_rental import search_car_rentals
-cars = search_car_rentals(
-    pickup_lat=51.5074, pickup_lon=-0.1278,
-    pickup_date="2024-12-20", pickup_time="10:00",
-    dropoff_lat=51.5074, dropoff_lon=-0.1278,
-    dropoff_date="2024-12-23", dropoff_time="10:00"
-)
-
 # Fuel Prices & Car Rental Rates (combined Gemini query)
 from tools.car_price import get_car_and_fuel_prices
 prices = get_car_and_fuel_prices("California")
@@ -60,13 +71,13 @@ from tools.car_price import get_fuel_prices
 fuel_only = get_fuel_prices("California")  # Filters out car rental data
 
 # Distance Matrix
-from tools.distance_matirx import get_distance_matrix
+from tools.distance_matrix import get_distance_matrix
 distances = get_distance_matrix(
     ["51.5074,-0.1278"], ["48.8566,2.3522"], mode="DRIVE"
 )
 ```
 
-### 4. Test ResearchAgent
+### 5. Test ResearchAgent
 ```python
 from agents.research_agent import ResearchAgent
 
@@ -115,19 +126,6 @@ search_hotels_by_city(city_name: str, checkin_date: str, checkout_date: str,
 → List[Dict]  # [{name, address, price, currency, rating}, ...]
 ```
 
-### Car Rentals (⚠️ NEW INTERFACE)
-```python
-search_car_rentals(
-    pickup_lat: float, pickup_lon: float,
-    pickup_date: str,  # YYYY-MM-DD
-    pickup_time: str,  # HH:MM
-    dropoff_lat: float, dropoff_lon: float,
-    dropoff_date: str, dropoff_time: str,
-    currency: str = "USD", limit: int = 5
-)
-→ List[Dict]  # [{provider, vehicle_type, price, currency}, ...]
-```
-
 ### Fuel Prices & Car Rental Rates (Combined)
 ```python
 # New combined function (recommended)
@@ -146,6 +144,15 @@ get_fuel_prices(location: str)  # Filters out car rental data
 get_distance_matrix(origins: List[str], destinations: List[str], mode: str = "DRIVE")
 → List[Dict]  # [{origin, destination, distance_km, duration_min}, ...]
 ```
+
+## 🧪 End-to-End Flow
+
+1. A user message submitted in Streamlit is POSTed to `/sessions/{id}/turns`.
+2. `TravelPlannerRuntime` pushes the turn into the `travel_graph` state machine and waits for interrupts (human approval) or agent completions.
+3. Research tasks fan out to the tool layer with retry/backoff, normalizing results into `weather`, `attractions`, `dining`, `hotels`, `car_rentals`, `fuel_prices`, and `distances` keys.
+4. The itinerary and budget agents enrich the shared state, and final responses are rendered back through the chat UI.
+
+When deploying to Cloud Run, set environment variables (`ENV`, `PORT`, `GOOGLE_PROJECT_ID`, `GOOGLE_LOCATION`, `GOOGLE_GENAI_MODEL`, `DATABASE_URL`, plus API keys) and configure CORS origins via `CORS_ORIGINS` to avoid wildcards in production.
 
 ## 🔑 API Key Quick Links
 
