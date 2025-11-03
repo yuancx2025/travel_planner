@@ -1,5 +1,5 @@
 # tools/car_price.py
-"""Combined fuel prices and car rental rates tool using Gemini + Google Search grounding."""
+"""We can't find existing consumer API for car rental and fuel price data, therefore, we built this tool using Gemini + Google Search grounding."""
 from __future__ import annotations
 
 import os
@@ -34,7 +34,7 @@ class CarAndFuelPrices(BaseModel):
     currency: str = "USD"
     fuel_unit: str = "per gallon"
     rental_unit: str = "per day"
-    source: str = "google_search"
+    source: str = "google_search" 
     last_updated: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @field_validator("state")
