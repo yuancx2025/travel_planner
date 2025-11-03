@@ -147,11 +147,15 @@ class ChatAgent:
         Use an LLM to extract ALL relevant fields from arbitrary user text.
         No regexes or hard-coded parsing — model-only extraction to JSON.
         """
+        from datetime import datetime
         field_list = "\n".join(f"- \"{f}\"" for f in self.all_fields)
         current_state_json = json.dumps(current_state, ensure_ascii=False, indent=2)
+        current_date = datetime.now().strftime("%Y-%m-%d")
         system_prompt = self.extraction_prompt_template.format(
             field_list=field_list,
             current_state=current_state_json,
+            current_date=current_date,
+            user_message=message,
         )
         messages = [
             SystemMessage(content=system_prompt),
