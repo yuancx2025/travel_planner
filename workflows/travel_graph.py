@@ -323,8 +323,12 @@ def build_travel_planner_graph(
     builder.add_edge("compute_budget", "route")
     builder.add_edge("await_budget_confirmation", "route")
 
-    def next_phase(state: Dict[str, Any]) -> str:
-        return state.get("phase", "complete")
+    def next_phase(state: Dict[str, Any] | TravelPlannerState) -> str:
+        if isinstance(state, TravelPlannerState):
+            return state.phase
+        if isinstance(state, dict):
+            return state.get("phase", "complete")
+        return "complete"
 
     builder.add_conditional_edges(
         "route",
