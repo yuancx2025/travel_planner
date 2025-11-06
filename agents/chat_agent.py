@@ -8,8 +8,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from prompts import PromptTemplate, load_prompt_template
 
-if not os.getenv("GOOGLE_API_KEY"):
-    raise EnvironmentError("Missing GOOGLE_API_KEY. Run: export GOOGLE_API_KEY='your_key_here'")
 
 class ChatAgent:
     """
@@ -29,6 +27,10 @@ class ChatAgent:
         intake_prompt: Optional[PromptTemplate] = None,
         extraction_prompt: Optional[PromptTemplate] = None,
     ):
+        # Validate API key
+        if not os.getenv("GOOGLE_API_KEY") and not os.getenv("GEMINI_API_KEY"):
+            print("⚠️  Warning: Missing GOOGLE_API_KEY or GEMINI_API_KEY. ChatAgent may not function properly.")
+        
         self.model = model if model is not None else ChatGoogleGenerativeAI(model=model_name, temperature=temperature, streaming=True)
         self.intake_prompt_template = intake_prompt or load_prompt_template("intake", "intake.md")
         self.extraction_prompt_template = extraction_prompt or load_prompt_template("extract_preferences", "extract_preferences.md")
