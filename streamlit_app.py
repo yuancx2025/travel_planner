@@ -58,7 +58,7 @@ def _send_turn(
     response = client.post(f"/sessions/{session_id}/turns", json=payload)
     if response.status_code == 404:
         _create_session(client)
-        st.experimental_rerun()
+        st.rerun()
         return
     response.raise_for_status()
     _update_session(response.json())
@@ -176,7 +176,7 @@ def _render_interrupts(client: httpx.Client, interrupts: List[Dict[str, Any]]) -
                     index_map = {label: i for label, i in entries}
                     indices = [index_map[label] for label in selected]
                     _send_turn(client, interrupt={"selected_indices": indices})
-                    st.experimental_rerun()
+                    st.rerun()
 
         elif interrupt_type == "confirm_itinerary":
             with st.form(key=f"confirm_itinerary_{idx}"):
@@ -189,7 +189,7 @@ def _render_interrupts(client: httpx.Client, interrupts: List[Dict[str, Any]]) -
                 )
                 if st.form_submit_button("Submit response"):
                     _send_turn(client, interrupt={"approved": choice == "Approve"})
-                    st.experimental_rerun()
+                    st.rerun()
 
         elif interrupt_type == "confirm_budget":
             with st.form(key=f"confirm_budget_{idx}"):
@@ -202,7 +202,7 @@ def _render_interrupts(client: httpx.Client, interrupts: List[Dict[str, Any]]) -
                 )
                 if st.form_submit_button("Submit response"):
                     _send_turn(client, interrupt={"confirmed": choice == "Confirm"})
-                    st.experimental_rerun()
+                    st.rerun()
 
 
 def main() -> None:
@@ -237,7 +237,7 @@ def main() -> None:
             _send_turn(client, message=prompt)
         except httpx.HTTPError as exc:  # pragma: no cover - network failure feedback
             st.error(f"Request failed: {exc}")
-        st.experimental_rerun()
+    st.rerun()
 
     if interrupts:
         _render_interrupts(client, interrupts)
