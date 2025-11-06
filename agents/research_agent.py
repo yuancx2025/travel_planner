@@ -28,8 +28,6 @@ class ResearchAgent:
         missing = []
         if not os.getenv("GOOGLE_MAPS_API_KEY"):
             missing.append("GOOGLE_MAPS_API_KEY")
-        if not os.getenv("RAPIDAPI_KEY"):
-            missing.append("RAPIDAPI_KEY (for car rentals)")
         if not os.getenv("AMADEUS_API_KEY") or not os.getenv("AMADEUS_API_SECRET"):
             missing.append("AMADEUS_API_KEY/SECRET (for hotels)")
 
