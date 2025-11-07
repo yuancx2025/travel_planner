@@ -89,7 +89,7 @@ def search_hotels_by_city(city_code, check_in, check_out, adults=2, limit=10):
             return []
 
         # Take multiple hotels to increase chance of finding availability
-        hotel_ids = [h["hotelId"] for h in hotel_list.data[:limit]]
+        hotel_ids = [str(h["hotelId"]) for h in hotel_list.data[:limit]]
         print(f"🔍 Found {len(hotel_ids)} hotels near '{city_code}' ({resolved_code}), checking availability...")
 
         # 2️⃣ Get offers for those hotels (batch query)
@@ -106,7 +106,24 @@ def search_hotels_by_city(city_code, check_in, check_out, adults=2, limit=10):
         if not response.data:
             print(f"⚠️  No availability for {check_in} to {check_out} near '{city_code}'.")
             print("💡 Try different dates or increase limit parameter.")
-            return []
+
+            fallback_results = []
+            for hotel in hotel_list.data[:limit]:
+                hotel_info = hotel.get("hotel", hotel) if isinstance(hotel, dict) else hotel
+                fallback_results.append(
+                    {
+                        "hotel_id": hotel_info.get("hotelId"),
+                        "name": hotel_info.get("name"),
+                        "address": hotel_info.get("address", {}).get("lines", ["N/A"])[0],
+                        "price": None,
+                        "currency": None,
+                        "rating": hotel_info.get("rating"),
+                        "source": "amadeus",
+                        "raw": hotel,
+                    }
+                )
+
+            return fallback_results
 
         results = []
         for offer in response.data:
@@ -125,6 +142,7 @@ def search_hotels_by_city(city_code, check_in, check_out, adults=2, limit=10):
                     "currency": price.get("currency"),
                     "rating": hotel.get("rating"),
                     "source": "amadeus",
+                    "raw": offer,
                 }
             )
 
