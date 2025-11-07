@@ -204,7 +204,7 @@ class ItineraryAgent:
             lines.append("=== RESTAURANT RECOMMENDATIONS ===")
             for i, rest in enumerate(research_results["dining"][:6], 1):
                 rating = f"{rest.get('rating', 'N/A')}⭐" if rest.get("rating") else "No rating"
-                price = "$" * (rest.get("price_level") or 2) if rest.get("price_level") else "Unknown"
+                price = self._format_price_level(rest.get("price_level"))
                 lines.append(
                     f"{i}. {rest['name']} ({rating}, {price}) - {rest.get('address', 'N/A')}"
                 )
@@ -273,6 +273,42 @@ class ItineraryAgent:
     # ------------------------------------------------------------------
     # LLM-driven scheduling pipeline
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _format_price_level(value: Any) -> str:
+        if value is None:
+            return "Unknown"
+
+        if isinstance(value, (int, float)):
+            repeat = max(1, min(4, int(round(value))))
+            return "$" * repeat
+
+        if isinstance(value, str):
+            normalized = value.strip().upper()
+            google_map = {
+                "PRICE_LEVEL_FREE": "$",
+                "PRICE_LEVEL_CHEAP": "$",
+                "PRICE_LEVEL_INEXPENSIVE": "$",
+                "PRICE_LEVEL_MODERATE": "$$",
+                "PRICE_LEVEL_EXPENSIVE": "$$$",
+                "PRICE_LEVEL_VERY_EXPENSIVE": "$$$$",
+                "PRICE_LEVEL_UNSPECIFIED": "Unknown",
+                "CHEAP": "$",
+                "INEXPENSIVE": "$",
+                "MODERATE": "$$",
+                "EXPENSIVE": "$$$",
+                "VERY_EXPENSIVE": "$$$$",
+            }
+            if normalized in google_map:
+                return google_map[normalized]
+            if normalized.isdigit():
+                repeat = max(1, min(4, int(normalized)))
+                return "$" * repeat
+            if all(ch == "$" for ch in normalized) and normalized:
+                return normalized
+            return normalized.replace("_", " ").title()
+
+        return "Unknown"
 
     def _plan_day_blocks(
         self,
