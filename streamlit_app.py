@@ -17,8 +17,16 @@ def get_http_client() -> httpx.Client:
 
 
 def _update_session(data: Dict[str, Any]) -> None:
-    st.session_state["state"] = data.get("state", {})
-    st.session_state["interrupts"] = data.get("interrupts", [])
+    raw_state = data.get("state")
+    if not isinstance(raw_state, dict):
+        raw_state = {} if raw_state is None else dict(raw_state)
+
+    raw_interrupts = data.get("interrupts")
+    if not isinstance(raw_interrupts, list):
+        raw_interrupts = []
+
+    st.session_state["state"] = raw_state
+    st.session_state["interrupts"] = raw_interrupts
 
 
 def _create_session(client: httpx.Client) -> None:
@@ -65,9 +73,21 @@ def _send_turn(
 
 
 def _render_preferences_sidebar(state: Dict[str, Any]) -> None:
+    if state is None:
+        state = {}
+
     with st.sidebar:
         st.header("Traveler profile")
-        prefs = state.get("preferences", {}).get("fields", {})
+        preferences = state.get("preferences")
+        if preferences and hasattr(preferences, "model_dump"):
+            preferences = preferences.model_dump()
+        if not isinstance(preferences, dict):
+            preferences = {}
+        prefs = preferences.get("fields")
+        if prefs and hasattr(prefs, "model_dump"):
+            prefs = prefs.model_dump()
+        if not isinstance(prefs, dict):
+            prefs = {}
         if not prefs:
             st.write("Share your travel preferences to begin.")
             return
@@ -78,7 +98,18 @@ def _render_preferences_sidebar(state: Dict[str, Any]) -> None:
 
 
 def _render_itinerary(state: Dict[str, Any]) -> None:
-    itinerary = state.get("itinerary", {}).get("days") or []
+    if state is None:
+        state = {}
+
+    itinerary_data = state.get("itinerary")
+    if itinerary_data and hasattr(itinerary_data, "model_dump"):
+        itinerary_data = itinerary_data.model_dump()
+    if isinstance(itinerary_data, dict):
+        itinerary = itinerary_data.get("days") or []
+    elif isinstance(itinerary_data, list):
+        itinerary = itinerary_data
+    else:
+        itinerary = []
     if not itinerary:
         return
 
@@ -118,7 +149,14 @@ def _render_itinerary(state: Dict[str, Any]) -> None:
 
 
 def _render_budget(state: Dict[str, Any]) -> None:
-    budget = state.get("budget") or {}
+    if state is None:
+        state = {}
+
+    budget = state.get("budget")
+    if budget and hasattr(budget, "model_dump"):
+        budget = budget.model_dump()
+    if not isinstance(budget, dict):
+        budget = {}
     if not budget:
         return
 
@@ -140,7 +178,8 @@ def _render_budget(state: Dict[str, Any]) -> None:
 
 
 def _render_interrupts(client: httpx.Client, interrupts: List[Dict[str, Any]]) -> None:
-    for idx, interrupt in enumerate(interrupts):
+    iterable = interrupts or []
+    for idx, interrupt in enumerate(iterable):
         interrupt_type = interrupt.get("type")
         if interrupt_type not in {"select_attractions", "select_restaurants"}:
             continue
@@ -218,12 +257,30 @@ def main() -> None:
         st.error(f"Unable to connect to the planner API: {exc}")
         return
 
-    state = st.session_state.get("state", {})
-    interrupts = st.session_state.get("interrupts", [])
+    raw_state = st.session_state.get("state")
+    if raw_state and hasattr(raw_state, "model_dump"):
+        raw_state = raw_state.model_dump()
+    if not isinstance(raw_state, dict):
+        raw_state = {}
+
+    raw_interrupts = st.session_state.get("interrupts")
+    if raw_interrupts and hasattr(raw_interrupts, "model_dump"):
+        raw_interrupts = raw_interrupts.model_dump()
+    if not isinstance(raw_interrupts, list):
+        raw_interrupts = []
+
+    state = raw_state
+    interrupts = raw_interrupts
 
     _render_preferences_sidebar(state)
 
-    for turn in state.get("conversation_turns", []):
+    turns = state.get("conversation_turns")
+    if turns and hasattr(turns, "model_dump"):
+        turns = turns.model_dump()
+    if not isinstance(turns, list):
+        turns = []
+
+    for turn in turns:
         role = turn.get("role", "assistant")
         speaker = "assistant" if role != "user" else "user"
         with st.chat_message(speaker):
