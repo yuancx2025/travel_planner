@@ -61,7 +61,13 @@ def _get_agent():
     if _agent is None:
         if not GOOGLE_API_KEY:
             raise CarPriceError("Missing GEMINI_API_KEY or GOOGLE_API_KEY environment variable")
-        _model = GeminiModel("gemini-2.0-flash-exp", api_key=GOOGLE_API_KEY)
+
+        # pydantic-ai's Google Search grounding expects GEMINI_API_KEY in the environment
+        if "GEMINI_API_KEY" not in os.environ:
+            os.environ["GEMINI_API_KEY"] = GOOGLE_API_KEY
+
+        # pydantic-ai GeminiModel reads API key from environment; no api_key kwarg
+        _model = GeminiModel("gemini-2.0-flash-exp")
         _agent = Agent(
             model=_model,
             output_type=CarAndFuelPrices,
