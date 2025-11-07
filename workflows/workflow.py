@@ -530,12 +530,204 @@ def run_smoke_test() -> None:
     print("Smoke test passed – workflow completed successfully.")
 
 
+def run_interactive_test() -> None:
+    """Run an interactive smoke test where you can chat with the workflow.
+    
+    This simulates the full travel planning experience:
+    - Chat with the assistant to provide preferences
+    - System researches attractions/restaurants
+    - You select your favorites interactively
+    - System generates itinerary and budget
+    """
+    import json
+    
+    workflow = TravelPlannerWorkflow(
+        chat_agent=_StubChatAgent(),
+        research_agent=_StubResearchAgent(),
+        itinerary_agent=_StubItineraryAgent(),
+        budget_agent=_StubBudgetAgent(),
+    )
+    
+    print("=" * 70)
+    print("🌍 INTERACTIVE TRAVEL PLANNER SMOKE TEST")
+    print("=" * 70)
+    print("\nThis is a simulated workflow using stub agents (no real API calls).")
+    print("You can chat naturally and make selections to test the workflow.\n")
+    
+    state = workflow.initial_state("interactive-test-thread")
+    state, _ = workflow.start(state)
+    
+    # Show initial greeting
+    last_assistant_msg = state.conversation_turns[-1].content
+    print(f"\n🤖 Assistant: {last_assistant_msg}\n")
+    
+    # Phase 1: Collect preferences through conversation
+    while state.phase == "collecting":
+        user_input = input("👤 You: ").strip()
+        if not user_input:
+            continue
+        if user_input.lower() in ["quit", "exit", "q"]:
+            print("\nExiting interactive test.")
+            return
+        
+        state, interrupts = workflow.handle_user_message(state, user_input)
+        
+        # Show assistant response
+        last_turn = state.conversation_turns[-1]
+        if last_turn.role == "assistant":
+            print(f"\n🤖 Assistant: {last_turn.content}\n")
+        
+        # Check if we got interrupts (research completed)
+        if interrupts:
+            break
+    
+    # Phase 2: Handle attraction selection
+    if state.phase == "selecting_attractions" and state.research:
+        print("\n" + "=" * 70)
+        print("🏛️  ATTRACTION SELECTION")
+        print("=" * 70)
+        
+        attractions = state.research.attractions
+        print(f"\nFound {len(attractions)} attractions:\n")
+        
+        for idx, attr in enumerate(attractions):
+            print(f"  [{idx}] {attr['name']}")
+            print(f"      📍 {attr.get('address', 'N/A')}")
+            print(f"      ⭐ {attr.get('rating', 'N/A')} ({attr.get('review_count', 0)} reviews)")
+            print()
+        
+        while True:
+            selection = input(f"👤 Select attractions (e.g., '0,1' or '0 1'): ").strip()
+            if selection.lower() in ["quit", "exit", "q"]:
+                print("\nExiting interactive test.")
+                return
+            
+            # Parse selection
+            try:
+                if "," in selection:
+                    indices = [int(x.strip()) for x in selection.split(",") if x.strip()]
+                else:
+                    indices = [int(x.strip()) for x in selection.split() if x.strip()]
+                
+                state, interrupts = workflow.handle_interrupt(
+                    state, {"selected_indices": indices}
+                )
+                
+                print(f"\n✅ Selected {len(state.selected_attractions)} attractions:")
+                for attr in state.selected_attractions:
+                    print(f"   • {attr['name']}")
+                break
+            except (ValueError, IndexError) as e:
+                print(f"❌ Invalid selection. Please try again (e.g., '0,1')\n")
+    
+    # Phase 3: Handle restaurant selection
+    if state.phase == "selecting_restaurants" and state.research:
+        print("\n" + "=" * 70)
+        print("🍽️  RESTAURANT SELECTION")
+        print("=" * 70)
+        
+        # Show assistant message
+        last_turn = state.conversation_turns[-1]
+        if last_turn.role == "assistant":
+            print(f"\n🤖 Assistant: {last_turn.content}\n")
+        
+        restaurants = state.research.dining
+        print(f"\nFound {len(restaurants)} restaurants:\n")
+        
+        for idx, rest in enumerate(restaurants):
+            print(f"  [{idx}] {rest['name']}")
+            print(f"      📍 {rest.get('address', 'N/A')}")
+            print(f"      ⭐ {rest.get('rating', 'N/A')} ({rest.get('review_count', 0)} reviews)")
+            price = rest.get('price_level')
+            if price:
+                print(f"      💰 {'$' * price}")
+            print()
+        
+        while True:
+            selection = input(f"👤 Select restaurants (e.g., '0' or '0,1'): ").strip()
+            if selection.lower() in ["quit", "exit", "q"]:
+                print("\nExiting interactive test.")
+                return
+            
+            try:
+                if "," in selection:
+                    indices = [int(x.strip()) for x in selection.split(",") if x.strip()]
+                else:
+                    indices = [int(x.strip()) for x in selection.split() if x.strip()]
+                
+                state, interrupts = workflow.handle_interrupt(
+                    state, {"selected_indices": indices}
+                )
+                
+                print(f"\n✅ Selected {len(state.selected_restaurants)} restaurants:")
+                for rest in state.selected_restaurants:
+                    print(f"   • {rest['name']}")
+                break
+            except (ValueError, IndexError) as e:
+                print(f"❌ Invalid selection. Please try again (e.g., '0')\n")
+    
+    # Phase 4: Show final results
+    if state.phase == "complete":
+        print("\n" + "=" * 70)
+        print("✨ FINAL ITINERARY")
+        print("=" * 70)
+        
+        # Show assistant message
+        last_turn = state.conversation_turns[-1]
+        if last_turn.role == "assistant":
+            print(f"\n🤖 Assistant: {last_turn.content}\n")
+        
+        # Show preferences
+        print("📋 Your Preferences:")
+        prefs = state.preferences.fields
+        for key, value in prefs.items():
+            formatted_key = key.replace("_", " ").title()
+            print(f"   • {formatted_key}: {value}")
+        
+        # Show itinerary
+        if state.itinerary:
+            print("\n📅 Itinerary:")
+            days = state.itinerary.get("days", [])
+            for day_info in days:
+                day_num = day_info.get("day", "?")
+                print(f"\n   Day {day_num}:")
+                for stop in day_info.get("stops", []):
+                    print(f"      • {stop.get('name', 'Unknown')}")
+        
+        # Show budget
+        if state.budget:
+            print(f"\n💰 Budget Estimate:")
+            budget = state.budget
+            print(f"   {budget.get('currency', 'USD')} {budget.get('expected', 0):,.2f}")
+        
+        # Show planning context
+        if state.planning_context:
+            print(f"\n💬 Planning Context:")
+            print(f"   {state.planning_context}")
+        
+        print("\n" + "=" * 70)
+        print("✅ WORKFLOW COMPLETE!")
+        print("=" * 70)
+        
+        # Show conversation history
+        print(f"\n📜 Conversation History ({len(state.conversation_turns)} turns):")
+        for i, turn in enumerate(state.conversation_turns, 1):
+            role_icon = "🤖" if turn.role == "assistant" else "👤"
+            print(f"   {i}. {role_icon} {turn.role.title()}: {turn.content[:60]}...")
+        
+        print()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Travel planner workflow utilities")
     parser.add_argument("--smoke", action="store_true", help="Run a smoke test against stub agents")
+    parser.add_argument("--interactive", action="store_true", help="Run an interactive smoke test")
     args = parser.parse_args()
 
     if args.smoke:
         run_smoke_test()
+    elif args.interactive:
+        run_interactive_test()
     else:
-        print("Run with --smoke to execute the workflow smoke test.")
+        print("Run with --smoke to execute the automated workflow smoke test.")
+        print("Run with --interactive to chat with the workflow interactively.")
