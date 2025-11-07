@@ -1,7 +1,13 @@
 import json
 import os
 import re
+import sys
+from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
+
+# Add parent directory to path when running as script so we can import prompts module
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -289,100 +295,102 @@ class ChatAgent:
 
         return SystemMessage(content=text)
 
-# A mini test to see if chat agent works as expected
-if __name__ == "__main__":
-    """
-    Terminal REPL for ChatAgent.
-    Commands:
-      /state      -> print current state JSON
-      /missing    -> print missing required fields
-      /reset      -> clear state and conversation
-      /save PATH  -> save state to a file (JSON)
-      /load PATH  -> load state from a file (JSON)
-      /help       -> show commands
-      /quit       -> exit
-    """
-    import json
-    import pathlib
-    import sys
+# # A mini test to see if chat agent works as expected
+# if __name__ == "__main__":
+#     """
+#     Terminal REPL for ChatAgent.
+#     Commands:
+#       /state      -> print current state JSON
+#       /missing    -> print missing required fields
+#       /reset      -> clear state and conversation
+#       /save PATH  -> save state to a file (JSON)
+#       /load PATH  -> load state from a file (JSON)
+#       /help       -> show commands
+#       /quit       -> exit
+#     """
+#     import json
+#     import pathlib
+#     import sys
+    
+#     # sys.path already added at top of file
 
-    # 1) init the agent (uses your default gemini model)
-    agent = ChatAgent()
-    state: Dict[str, Any] = {}
+#     # 1) init the agent (uses your default gemini model)
+#     agent = ChatAgent()
+#     state: Dict[str, Any] = {}
 
-    print("🔹 ChatAgent REPL (Gemini). Type /help for commands. Ctrl+C to exit.")
-    while True:
-        try:
-            user = input("\nYou: ").strip()
+#     print("🔹 ChatAgent REPL (Gemini). Type /help for commands. Ctrl+C to exit.")
+#     while True:
+#         try:
+#             user = input("\nYou: ").strip()
 
-            # --- commands ---
-            if not user:
-                continue
-            if user == "/quit":
-                print("Bye! 👋")
-                sys.exit(0)
-            if user == "/help":
-                print(
-                    "Commands:\n"
-                    "  /state         show current state\n"
-                    "  /missing       show missing required fields\n"
-                    "  /reset         clear state & conversation\n"
-                    "  /save PATH     save state to PATH (json)\n"
-                    "  /load PATH     load state from PATH (json)\n"
-                    "  /quit          exit"
-                )
-                continue
-            if user == "/state":
-                print(json.dumps(state, indent=2, ensure_ascii=False))
-                continue
-            if user == "/missing":
-                missing = [f for f in agent.required_fields if not state.get(f)]
-                print("Missing:", ", ".join(missing) if missing else "(none)")
-                continue
-            if user == "/reset":
-                state = {}
-                agent.conversation_history.clear()
-                print("Reset OK.")
-                continue
-            if user.startswith("/save "):
-                path = pathlib.Path(user.split(" ", 1)[1].strip())
-                path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
-                print(f"Saved -> {path}")
-                continue
-            if user.startswith("/load "):
-                path = pathlib.Path(user.split(" ", 1)[1].strip())
-                state = json.loads(path.read_text())
-                print(f"Loaded <- {path}")
-                continue
-            # Optional: auto-complete exit if user confirms and all fields are present
-            if user.lower() in {"confirm", "yes", "y"}:
-                missing = [f for f in agent.required_fields if not state.get(f)]
-                if not missing:
-                    print("Confirmed. Final state:")
-                    print(json.dumps(state, indent=2, ensure_ascii=False))
-                    print("Bye! 👋")
-                    sys.exit(0)
+#             # --- commands ---
+#             if not user:
+#                 continue
+#             if user == "/quit":
+#                 print("Bye! 👋")
+#                 sys.exit(0)
+#             if user == "/help":
+#                 print(
+#                     "Commands:\n"
+#                     "  /state         show current state\n"
+#                     "  /missing       show missing required fields\n"
+#                     "  /reset         clear state & conversation\n"
+#                     "  /save PATH     save state to PATH (json)\n"
+#                     "  /load PATH     load state from PATH (json)\n"
+#                     "  /quit          exit"
+#                 )
+#                 continue
+#             if user == "/state":
+#                 print(json.dumps(state, indent=2, ensure_ascii=False))
+#                 continue
+#             if user == "/missing":
+#                 missing = [f for f in agent.required_fields if not state.get(f)]
+#                 print("Missing:", ", ".join(missing) if missing else "(none)")
+#                 continue
+#             if user == "/reset":
+#                 state = {}
+#                 agent.conversation_history.clear()
+#                 print("Reset OK.")
+#                 continue
+#             if user.startswith("/save "):
+#                 path = pathlib.Path(user.split(" ", 1)[1].strip())
+#                 path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+#                 print(f"Saved -> {path}")
+#                 continue
+#             if user.startswith("/load "):
+#                 path = pathlib.Path(user.split(" ", 1)[1].strip())
+#                 state = json.loads(path.read_text())
+#                 print(f"Loaded <- {path}")
+#                 continue
+#             # Optional: auto-complete exit if user confirms and all fields are present
+#             if user.lower() in {"confirm", "yes", "y"}:
+#                 missing = [f for f in agent.required_fields if not state.get(f)]
+#                 if not missing:
+#                     print("Confirmed. Final state:")
+#                     print(json.dumps(state, indent=2, ensure_ascii=False))
+#                     print("Bye! 👋")
+#                     sys.exit(0)
 
-            # 2) normal chat turn -> collect info
-            out = agent.collect_info(user, state=state)
-            state = out["state"]  # update local state
+#             # 2) normal chat turn -> collect info
+#             out = agent.collect_info(user, state=state)
+#             state = out["state"]  # update local state
 
-            # 3) stream assistant reply
-            stream = out["stream"]
-            print("Assistant:", end=" ", flush=True)
-            if stream is not None:
-                for chunk in stream:
-                    # langchain streaming returns message chunks with `.content`
-                    piece = getattr(chunk, "content", None)
-                    if piece:
-                        print(piece, end="", flush=True)
-            print()  # newline
+#             # 3) stream assistant reply
+#             stream = out["stream"]
+#             print("Assistant:", end=" ", flush=True)
+#             if stream is not None:
+#                 for chunk in stream:
+#                     # langchain streaming returns message chunks with `.content`
+#                     piece = getattr(chunk, "content", None)
+#                     if piece:
+#                         print(piece, end="", flush=True)
+#             print()  # newline
 
-            # 4) show completion hint
-            if out["complete"]:
-                print("✅ All required fields collected. Type 'confirm' to finish, or /state to review.")
+#             # 4) show completion hint
+#             if out["complete"]:
+#                 print("✅ All required fields collected. Type 'confirm' to finish, or /state to review.")
 
-        except KeyboardInterrupt:
-            print("\nInterrupted. Type /quit to exit.")
-        except Exception as e:
-            print(f"\n[error] {e}")
+#         except KeyboardInterrupt:
+#             print("\nInterrupted. Type /quit to exit.")
+#         except Exception as e:
+#             print(f"\n[error] {e}")
