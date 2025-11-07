@@ -99,8 +99,27 @@ class ChatAgent:
         if not self.conversation_history:
             self.conversation_history.append(self._init_system_message())
 
+        # Handle empty initial greeting (no user input yet)
+        has_user_text = user_input and user_input.strip()
+        
+        if not has_user_text and len(self.conversation_history) == 1:
+            # First call with empty input: return greeting without calling LLM
+            missing = [f for f in self.required_fields if not state.get(f)]
+            greeting = "Hi there! I'm excited to help you plan your trip. To get started, could you tell me your name and where you'd like to go?"
+            
+            # Create a simple generator that yields the greeting
+            def greeting_stream():
+                yield type('Chunk', (), {'content': greeting})()
+            
+            return {
+                "stream": greeting_stream(),
+                "missing_fields": missing,
+                "complete": False,
+                "state": state.copy()
+            }
+
         # 1) LLM extraction → structured fields (merge if present)
-        if user_input and user_input.strip():
+        if has_user_text:
             new_info = self.extract_info_from_message(user_input, current_state=state)
             for field, value in new_info.items():
                 if value not in (None, "", []):
