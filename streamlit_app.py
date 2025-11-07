@@ -142,67 +142,65 @@ def _render_budget(state: Dict[str, Any]) -> None:
 def _render_interrupts(client: httpx.Client, interrupts: List[Dict[str, Any]]) -> None:
     for idx, interrupt in enumerate(interrupts):
         interrupt_type = interrupt.get("type")
-        if interrupt_type == "select_attractions":
-            options = interrupt.get("options") or []
-            if not options:
-                continue
-            with st.form(key=f"select_attractions_{idx}"):
-                st.subheader("Choose the attractions that excite you")
-                entries = []
-                for opt_idx, option in enumerate(options):
-                    name = option.get("name", "Attraction")
-                    rating = option.get("rating")
-                    address = option.get("address")
-                    details = []
-                    if rating:
-                        details.append(f"{rating}⭐")
-                    if address:
-                        details.append(address)
-                    label = f"{opt_idx + 1}. {name}"
-                    if details:
-                        label += " — " + " | ".join(details)
-                    entries.append((label, opt_idx))
+        if interrupt_type not in {"select_attractions", "select_restaurants"}:
+            continue
 
-                labels = [entry[0] for entry in entries]
-                defaults = labels[: min(2, len(labels))]
-                selected = st.multiselect(
-                    "Pick your must-see spots",
-                    labels,
-                    default=defaults,
-                    key=f"select_{idx}",
-                )
-                submitted = st.form_submit_button("Send selection")
-                if submitted:
-                    index_map = {label: i for label, i in entries}
-                    indices = [index_map[label] for label in selected]
-                    _send_turn(client, interrupt={"selected_indices": indices})
-                    st.rerun()
+        options = interrupt.get("options") or []
+        if not options:
+            continue
 
-        elif interrupt_type == "confirm_itinerary":
-            with st.form(key=f"confirm_itinerary_{idx}"):
-                st.subheader("Do you approve this itinerary?")
-                choice = st.radio(
-                    "",
-                    ("Approve", "Revise"),
-                    horizontal=True,
-                    key=f"itinerary_choice_{idx}",
-                )
-                if st.form_submit_button("Submit response"):
-                    _send_turn(client, interrupt={"approved": choice == "Approve"})
-                    st.rerun()
+        title = (
+            "Choose the attractions that excite you"
+            if interrupt_type == "select_attractions"
+            else "Pick the restaurants you'd love to try"
+        )
 
-        elif interrupt_type == "confirm_budget":
-            with st.form(key=f"confirm_budget_{idx}"):
-                st.subheader("Does the budget work for you?")
-                choice = st.radio(
-                    "",
-                    ("Confirm", "Adjust"),
-                    horizontal=True,
-                    key=f"budget_choice_{idx}",
-                )
-                if st.form_submit_button("Submit response"):
-                    _send_turn(client, interrupt={"confirmed": choice == "Confirm"})
-                    st.rerun()
+        with st.form(key=f"selection_{idx}"):
+            st.subheader(title)
+            entries: List[Dict[str, Any]] = []
+            labels: List[str] = []
+
+            for opt_idx, option in enumerate(options):
+                name = option.get("name", "Option")
+                rating = option.get("rating")
+                address = option.get("address")
+                price = option.get("price_level")
+                pieces = []
+                if rating:
+                    pieces.append(f"{rating}⭐")
+                if price:
+                    pieces.append(str(price))
+                if address:
+                    pieces.append(address)
+                label = f"{opt_idx + 1}. {name}"
+                if pieces:
+                    label += " — " + " | ".join(pieces)
+                labels.append(label)
+                entries.append({"label": label, "index": opt_idx, "option": option})
+
+            defaults = labels[: min(2, len(labels))]
+            selected_labels = st.multiselect(
+                "Select one or more options",
+                labels,
+                default=defaults,
+                key=f"selection_options_{idx}",
+            )
+
+            for entry in entries:
+                option = entry["option"]
+                with st.expander(entry["label"], expanded=False):
+                    map_url = option.get("map_url")
+                    street_view_url = option.get("street_view_url")
+                    if map_url:
+                        st.markdown(f"[Open in Google Maps]({map_url})")
+                    if street_view_url:
+                        st.markdown(f"[See in Street View]({street_view_url})")
+
+            if st.form_submit_button("Send selection"):
+                index_map = {entry["label"]: entry["index"] for entry in entries}
+                indices = [index_map[label] for label in selected_labels]
+                _send_turn(client, interrupt={"selected_indices": indices})
+                st.rerun()
 
 
 def main() -> None:
@@ -231,16 +229,16 @@ def main() -> None:
         with st.chat_message(speaker):
             st.markdown(turn.get("content", ""))
 
+    if interrupts:
+        _render_interrupts(client, interrupts)
+
     prompt = st.chat_input("Share more details about your trip")
     if prompt:
         try:
             _send_turn(client, message=prompt)
         except httpx.HTTPError as exc:  # pragma: no cover - network failure feedback
             st.error(f"Request failed: {exc}")
-    st.rerun()
-
-    if interrupts:
-        _render_interrupts(client, interrupts)
+        st.rerun()
 
     _render_itinerary(state)
     _render_budget(state)
