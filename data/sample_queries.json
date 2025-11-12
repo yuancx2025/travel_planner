@@ -1,0 +1,70 @@
+[
+    {
+        "idx": 0,
+        "org": "Charlotte",
+        "dest": "Miami",
+        "days": 3,
+        "visiting_city_number": 1,
+        "date": [
+            "2025-12-01",
+            "2025-12-03"
+        ], 
+        "people_number": 2,
+        "local_constraint": {
+            "cuisine": [
+                "Italian"
+            ],
+            "room type": "shared room",
+            "transportation": "no self-driving"
+        },
+        "budget": 1400,
+        "query": "Could you create a 3-day travel plan for 2 individuals departing Charlotte to Miami, with a budget of $1400?",
+        "level": "easy"
+    },
+    {
+        "idx": 1,
+        "org": "Boston",
+        "dest": "Seattle",
+        "days": 2,
+        "visiting_city_number": 1,
+        "date": [
+            "2025-12-15",
+            "2025-12-16"
+        ],
+        "people_number": 1,
+        "local_constraint": {
+            "cuisine": [
+                "Chinese",
+                "American"
+            ],
+            "transportation": "self-driving"
+        },
+        "budget": 800,
+        "query": "Please design a 2-day trip from Boston to Seattle for 1 person with an $800 budget.",
+        "level": "easy"
+    },
+    {
+        "idx": 2,
+        "org": "New York",
+        "dest": "San Francisco",
+        "days": 5,
+        "visiting_city_number": 1,
+        "date": [
+            "2026-01-10",
+            "2026-01-14"
+        ], 
+        "people_number": 3,
+        "local_constraint": {
+            "cuisine": [
+                "Chinese",
+                "Italian",
+                "Mexican"
+            ],
+            "room type": "entire room",
+            "transportation": "no self-driving"
+        },
+        "budget": 3500,
+        "query": "Can you make a 5-day travel itinerary for 3 people going from New York to San Francisco with a $3500 budget?",
+        "level": "medium"
+    }
+]
