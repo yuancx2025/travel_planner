@@ -167,11 +167,19 @@ class TravelPlannerWorkflow:
         """Process structured input from an interrupt (selection UI)."""
 
         if state.phase == "selecting_attractions":
+            # Check if user wants to refine research instead of selecting
+            if payload.get("action") == "refine":
+                return self._handle_refinement(state, payload.get("refinement_criteria", {}))
+
             indices = self._normalize_indices(payload.get("selected_indices"))
             state = self._apply_selection(state, indices, kind="attractions")
             return self._after_attractions_selected(state)
 
         if state.phase == "selecting_restaurants":
+            # Check if user wants to refine research for restaurants
+            if payload.get("action") == "refine":
+                return self._handle_refinement(state, payload.get("refinement_criteria", {}))
+
             indices = self._normalize_indices(payload.get("selected_indices"))
             state = self._apply_selection(state, indices, kind="restaurants")
             state = state.model_copy(update={"phase": "building_itinerary"})
@@ -179,6 +187,63 @@ class TravelPlannerWorkflow:
 
         # Any other interrupts are ignored gracefully.
         return state, []
+
+    def _handle_refinement(
+        self, state: TravelPlannerState, criteria: Dict[str, Any]
+    ) -> Tuple[TravelPlannerState, List[SelectionInterrupt]]:
+        """Handle research refinement request with additional focus criteria."""
+
+        # Check if we've exceeded max refinement iterations
+        if state.research_iteration >= state.max_refinement_iterations:
+            # Exceeded limit - return message and force selection
+            message = (
+                f"You've already refined your search {state.research_iteration} times. "
+                "Please make a selection from the current results."
+            )
+            turns = state.conversation_turns + [ConversationTurn(role="assistant", content=message)]
+            state = state.model_copy(update={"conversation_turns": turns})
+
+            # Return current research results for selection
+            research = state.research or ResearchState()
+            if state.phase == "selecting_attractions":
+                attractions = [item for item in research.attractions if not item.get("error")]
+                if attractions:
+                    return state, [self._build_selection_interrupt("attractions", attractions)]
+            elif state.phase == "selecting_restaurants":
+                restaurants = [item for item in research.dining if not item.get("error")]
+                if restaurants:
+                    return state, [self._build_selection_interrupt("restaurants", restaurants)]
+
+            # Fallback - move to next phase
+            return self._after_attractions_selected(state)
+
+        # Extract refinement criteria
+        additional_attractions = criteria.get("additional_attractions", [])
+        additional_restaurants = criteria.get("additional_restaurants", [])
+
+        # Build focus dict for research agent
+        focus: Dict[str, List[str]] = {}
+        if additional_attractions:
+            focus["attractions"] = additional_attractions if isinstance(additional_attractions, list) else [additional_attractions]
+        if additional_restaurants:
+            focus["dining"] = additional_restaurants if isinstance(additional_restaurants, list) else [additional_restaurants]
+
+        # Record refinement in history
+        refinement_record = {
+            "iteration": state.research_iteration + 1,
+            "criteria": criteria,
+            "focus": focus,
+        }
+
+        # Update state for refinement
+        state = state.model_copy(update={
+            "phase": "refining_research",
+            "research_iteration": state.research_iteration + 1,
+            "research_refinement_history": state.research_refinement_history + [refinement_record],
+        })
+
+        # Re-run research with focus
+        return self._run_research(state, focus=focus)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -203,20 +268,27 @@ class TravelPlannerWorkflow:
         return [idx] if idx >= 0 else []
 
     def _run_research(
-        self, state: TravelPlannerState
+        self, state: TravelPlannerState, focus: Optional[Dict[str, List[str]]] = None
     ) -> Tuple[TravelPlannerState, List[SelectionInterrupt]]:
         preferences = dict(state.preferences.fields)
 
         try:
-            research_results = self.research_agent.research(preferences)
+            research_results = self.research_agent.research(preferences, focus=focus)
         except Exception as exc:  # pragma: no cover - defensive logging
             research_results = {"error": str(exc)}
 
         research_state = ResearchState.from_raw(research_results)
 
-        message = (
-            "Great! I've gathered ideas for your trip. Let's pick the attractions you don't want to miss."
-        )
+        # Customize message based on whether this is initial research or refinement
+        if focus and state.research_iteration > 0:
+            message = (
+                f"I've refined the search based on your preferences. "
+                f"Here are updated results (refinement #{state.research_iteration})."
+            )
+        else:
+            message = (
+                "Great! I've gathered ideas for your trip. Let's pick the attractions you don't want to miss."
+            )
         turns = state.conversation_turns + [ConversationTurn(role="assistant", content=message)]
 
         state = state.model_copy(update={
@@ -387,347 +459,347 @@ class TravelPlannerWorkflow:
 # ----------------------------------------------------------------------
 
 
-@dataclass
-class _StubAgentReply:
-    content: str
+# @dataclass
+# class _StubAgentReply:
+#     content: str
 
 
-class _StubChatAgent:
-    """Deterministic chat agent used in the smoke test."""
+# class _StubChatAgent:
+#     """Deterministic chat agent used in the smoke test."""
 
-    def __init__(self) -> None:
-        self._called = False
+#     def __init__(self) -> None:
+#         self._called = False
 
-    def collect_info(self, message: str, state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        state = dict(state or {})
-        if not self._called:
-            reply = "Tell me about your travel plans."
-        else:
-            reply = "Wonderful! I'll research options now."
-            state.update(
-                {
-                    "destination_city": "Seattle",
-                    "travel_days": 3,
-                    "start_date": "2024-07-01",
-                    "budget_usd": 2500,
-                    "num_people": 2,
-                    "kids": "no",
-                    "activity_pref": "outdoor",
-                    "need_car_rental": "no",
-                    "hotel_room_pref": "king bed",
-                    "cuisine_pref": "seafood",
-                }
-            )
-        self._called = True
-        return {
-            "stream": [_StubAgentReply(reply)],
-            "state": state,
-            "missing_fields": [],
-            "complete": True,
-        }
-
-
-class _StubResearchAgent:
-    def research(self, state: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - simple stub
-        return {
-            "attractions": [
-                {
-                    "id": "attr_1",
-                    "name": "Space Needle",
-                    "address": "400 Broad St",
-                    "rating": 4.7,
-                    "review_count": 1234,
-                    "coord": {"lat": 47.6205, "lng": -122.3493},
-                },
-                {
-                    "id": "attr_2",
-                    "name": "Pike Place Market",
-                    "address": "85 Pike St",
-                    "rating": 4.8,
-                    "review_count": 5230,
-                    "coord": {"lat": 47.6097, "lng": -122.3425},
-                },
-            ],
-            "dining": [
-                {
-                    "id": "rest_1",
-                    "name": "Elliott's Oyster House",
-                    "address": "1201 Alaskan Way",
-                    "rating": 4.5,
-                    "review_count": 3487,
-                    "price_level": 3,
-                    "coord": {"lat": 47.6053, "lng": -122.3405},
-                }
-            ],
-        }
+#     def collect_info(self, message: str, state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+#         state = dict(state or {})
+#         if not self._called:
+#             reply = "Tell me about your travel plans."
+#         else:
+#             reply = "Wonderful! I'll research options now."
+#             state.update(
+#                 {
+#                     "destination_city": "Seattle",
+#                     "travel_days": 3,
+#                     "start_date": "2024-07-01",
+#                     "budget_usd": 2500,
+#                     "num_people": 2,
+#                     "kids": "no",
+#                     "activity_pref": "outdoor",
+#                     "need_car_rental": "no",
+#                     "hotel_room_pref": "king bed",
+#                     "cuisine_pref": "seafood",
+#                 }
+#             )
+#         self._called = True
+#         return {
+#             "stream": [_StubAgentReply(reply)],
+#             "state": state,
+#             "missing_fields": [],
+#             "complete": True,
+#         }
 
 
-class _StubItineraryAgent:
-    def build_itinerary(self, preferences: Dict[str, Any], attractions: Sequence[Dict[str, Any]], research: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - simple stub
-        return {
-            "days": [
-                {
-                    "day": 1,
-                    "stops": [
-                        {
-                            "name": attractions[0]["name"],
-                            "coord": attractions[0].get("coord"),
-                            "streetview_url": "https://www.google.com/maps",
-                        }
-                    ],
-                }
-            ]
-        }
-
-    def build_planning_context(
-        self,
-        *,
-        user_state: Dict[str, Any],
-        research_results: Dict[str, Any],
-        itinerary: Optional[Dict[str, Any]],
-        budget: Optional[Dict[str, Any]],
-        selected_attractions: Optional[Sequence[Dict[str, Any]]],
-    ) -> str:  # pragma: no cover - simple stub
-        return "Enjoy Seattle!"
-
-
-class _StubBudgetAgent:
-    def compute_budget(
-        self,
-        *,
-        preferences: Dict[str, Any],
-        research: Dict[str, Any],
-        itinerary: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:  # pragma: no cover - simple stub
-        return {"currency": "USD", "expected": 2100}
+# class _StubResearchAgent:
+#     def research(self, state: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - simple stub
+#         return {
+#             "attractions": [
+#                 {
+#                     "id": "attr_1",
+#                     "name": "Space Needle",
+#                     "address": "400 Broad St",
+#                     "rating": 4.7,
+#                     "review_count": 1234,
+#                     "coord": {"lat": 47.6205, "lng": -122.3493},
+#                 },
+#                 {
+#                     "id": "attr_2",
+#                     "name": "Pike Place Market",
+#                     "address": "85 Pike St",
+#                     "rating": 4.8,
+#                     "review_count": 5230,
+#                     "coord": {"lat": 47.6097, "lng": -122.3425},
+#                 },
+#             ],
+#             "dining": [
+#                 {
+#                     "id": "rest_1",
+#                     "name": "Elliott's Oyster House",
+#                     "address": "1201 Alaskan Way",
+#                     "rating": 4.5,
+#                     "review_count": 3487,
+#                     "price_level": 3,
+#                     "coord": {"lat": 47.6053, "lng": -122.3405},
+#                 }
+#             ],
+#         }
 
 
-def run_smoke_test() -> None:
-    """Run a deterministic smoke test to validate the workflow wiring."""
+# class _StubItineraryAgent:
+#     def build_itinerary(self, preferences: Dict[str, Any], attractions: Sequence[Dict[str, Any]], research: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - simple stub
+#         return {
+#             "days": [
+#                 {
+#                     "day": 1,
+#                     "stops": [
+#                         {
+#                             "name": attractions[0]["name"],
+#                             "coord": attractions[0].get("coord"),
+#                             "streetview_url": "https://www.google.com/maps",
+#                         }
+#                     ],
+#                 }
+#             ]
+#         }
 
-    workflow = TravelPlannerWorkflow(
-        chat_agent=_StubChatAgent(),
-        research_agent=_StubResearchAgent(),
-        itinerary_agent=_StubItineraryAgent(),
-        budget_agent=_StubBudgetAgent(),
-    )
-
-    state = workflow.initial_state("smoke-thread")
-    state, _ = workflow.start(state)
-
-    state, interrupts = workflow.handle_user_message(state, "Let's plan a Seattle getaway")
-    assert interrupts, "Expected attraction selection interrupt"
-    assert interrupts[0]["type"] == "select_attractions"
-
-    state, interrupts = workflow.handle_interrupt(state, {"selected_indices": [0]})
-    assert interrupts, "Expected restaurant selection interrupt"
-    assert interrupts[0]["type"] == "select_restaurants"
-
-    state, interrupts = workflow.handle_interrupt(state, {"selected_indices": [0]})
-    assert state.phase == "complete"
-    assert not interrupts
-
-    print("Smoke test passed – workflow completed successfully.")
+#     def build_planning_context(
+#         self,
+#         *,
+#         user_state: Dict[str, Any],
+#         research_results: Dict[str, Any],
+#         itinerary: Optional[Dict[str, Any]],
+#         budget: Optional[Dict[str, Any]],
+#         selected_attractions: Optional[Sequence[Dict[str, Any]]],
+#     ) -> str:  # pragma: no cover - simple stub
+#         return "Enjoy Seattle!"
 
 
-def run_interactive_test() -> None:
-    """Run an interactive smoke test where you can chat with the workflow.
+# class _StubBudgetAgent:
+#     def compute_budget(
+#         self,
+#         *,
+#         preferences: Dict[str, Any],
+#         research: Dict[str, Any],
+#         itinerary: Optional[Dict[str, Any]],
+#     ) -> Dict[str, Any]:  # pragma: no cover - simple stub
+#         return {"currency": "USD", "expected": 2100}
+
+
+# def run_smoke_test() -> None:
+#     """Run a deterministic smoke test to validate the workflow wiring."""
+
+#     workflow = TravelPlannerWorkflow(
+#         chat_agent=_StubChatAgent(),
+#         research_agent=_StubResearchAgent(),
+#         itinerary_agent=_StubItineraryAgent(),
+#         budget_agent=_StubBudgetAgent(),
+#     )
+
+#     state = workflow.initial_state("smoke-thread")
+#     state, _ = workflow.start(state)
+
+#     state, interrupts = workflow.handle_user_message(state, "Let's plan a Seattle getaway")
+#     assert interrupts, "Expected attraction selection interrupt"
+#     assert interrupts[0]["type"] == "select_attractions"
+
+#     state, interrupts = workflow.handle_interrupt(state, {"selected_indices": [0]})
+#     assert interrupts, "Expected restaurant selection interrupt"
+#     assert interrupts[0]["type"] == "select_restaurants"
+
+#     state, interrupts = workflow.handle_interrupt(state, {"selected_indices": [0]})
+#     assert state.phase == "complete"
+#     assert not interrupts
+
+#     print("Smoke test passed – workflow completed successfully.")
+
+
+# def run_interactive_test() -> None:
+#     """Run an interactive smoke test where you can chat with the workflow.
     
-    This simulates the full travel planning experience:
-    - Chat with the assistant to provide preferences
-    - System researches attractions/restaurants
-    - You select your favorites interactively
-    - System generates itinerary and budget
-    """
-    import json
+#     This simulates the full travel planning experience:
+#     - Chat with the assistant to provide preferences
+#     - System researches attractions/restaurants
+#     - You select your favorites interactively
+#     - System generates itinerary and budget
+#     """
+#     import json
     
-    workflow = TravelPlannerWorkflow(
-        chat_agent=_StubChatAgent(),
-        research_agent=_StubResearchAgent(),
-        itinerary_agent=_StubItineraryAgent(),
-        budget_agent=_StubBudgetAgent(),
-    )
+#     workflow = TravelPlannerWorkflow(
+#         chat_agent=_StubChatAgent(),
+#         research_agent=_StubResearchAgent(),
+#         itinerary_agent=_StubItineraryAgent(),
+#         budget_agent=_StubBudgetAgent(),
+#     )
     
-    print("=" * 70)
-    print("🌍 INTERACTIVE TRAVEL PLANNER SMOKE TEST")
-    print("=" * 70)
-    print("\nThis is a simulated workflow using stub agents (no real API calls).")
-    print("You can chat naturally and make selections to test the workflow.\n")
+#     print("=" * 70)
+#     print("🌍 INTERACTIVE TRAVEL PLANNER SMOKE TEST")
+#     print("=" * 70)
+#     print("\nThis is a simulated workflow using stub agents (no real API calls).")
+#     print("You can chat naturally and make selections to test the workflow.\n")
     
-    state = workflow.initial_state("interactive-test-thread")
-    state, _ = workflow.start(state)
+#     state = workflow.initial_state("interactive-test-thread")
+#     state, _ = workflow.start(state)
     
-    # Show initial greeting
-    last_assistant_msg = state.conversation_turns[-1].content
-    print(f"\n🤖 Assistant: {last_assistant_msg}\n")
+#     # Show initial greeting
+#     last_assistant_msg = state.conversation_turns[-1].content
+#     print(f"\n🤖 Assistant: {last_assistant_msg}\n")
     
-    # Phase 1: Collect preferences through conversation
-    while state.phase == "collecting":
-        user_input = input("👤 You: ").strip()
-        if not user_input:
-            continue
-        if user_input.lower() in ["quit", "exit", "q"]:
-            print("\nExiting interactive test.")
-            return
+#     # Phase 1: Collect preferences through conversation
+#     while state.phase == "collecting":
+#         user_input = input("👤 You: ").strip()
+#         if not user_input:
+#             continue
+#         if user_input.lower() in ["quit", "exit", "q"]:
+#             print("\nExiting interactive test.")
+#             return
         
-        state, interrupts = workflow.handle_user_message(state, user_input)
+#         state, interrupts = workflow.handle_user_message(state, user_input)
         
-        # Show assistant response
-        last_turn = state.conversation_turns[-1]
-        if last_turn.role == "assistant":
-            print(f"\n🤖 Assistant: {last_turn.content}\n")
+#         # Show assistant response
+#         last_turn = state.conversation_turns[-1]
+#         if last_turn.role == "assistant":
+#             print(f"\n🤖 Assistant: {last_turn.content}\n")
         
-        # Check if we got interrupts (research completed)
-        if interrupts:
-            break
+#         # Check if we got interrupts (research completed)
+#         if interrupts:
+#             break
     
-    # Phase 2: Handle attraction selection
-    if state.phase == "selecting_attractions" and state.research:
-        print("\n" + "=" * 70)
-        print("🏛️  ATTRACTION SELECTION")
-        print("=" * 70)
+#     # Phase 2: Handle attraction selection
+#     if state.phase == "selecting_attractions" and state.research:
+#         print("\n" + "=" * 70)
+#         print("🏛️  ATTRACTION SELECTION")
+#         print("=" * 70)
         
-        attractions = state.research.attractions
-        print(f"\nFound {len(attractions)} attractions:\n")
+#         attractions = state.research.attractions
+#         print(f"\nFound {len(attractions)} attractions:\n")
         
-        for idx, attr in enumerate(attractions):
-            print(f"  [{idx}] {attr['name']}")
-            print(f"      📍 {attr.get('address', 'N/A')}")
-            print(f"      ⭐ {attr.get('rating', 'N/A')} ({attr.get('review_count', 0)} reviews)")
-            print()
+#         for idx, attr in enumerate(attractions):
+#             print(f"  [{idx}] {attr['name']}")
+#             print(f"      📍 {attr.get('address', 'N/A')}")
+#             print(f"      ⭐ {attr.get('rating', 'N/A')} ({attr.get('review_count', 0)} reviews)")
+#             print()
         
-        while True:
-            selection = input(f"👤 Select attractions (e.g., '0,1' or '0 1'): ").strip()
-            if selection.lower() in ["quit", "exit", "q"]:
-                print("\nExiting interactive test.")
-                return
+#         while True:
+#             selection = input(f"👤 Select attractions (e.g., '0,1' or '0 1'): ").strip()
+#             if selection.lower() in ["quit", "exit", "q"]:
+#                 print("\nExiting interactive test.")
+#                 return
             
-            # Parse selection
-            try:
-                if "," in selection:
-                    indices = [int(x.strip()) for x in selection.split(",") if x.strip()]
-                else:
-                    indices = [int(x.strip()) for x in selection.split() if x.strip()]
+#             # Parse selection
+#             try:
+#                 if "," in selection:
+#                     indices = [int(x.strip()) for x in selection.split(",") if x.strip()]
+#                 else:
+#                     indices = [int(x.strip()) for x in selection.split() if x.strip()]
                 
-                state, interrupts = workflow.handle_interrupt(
-                    state, {"selected_indices": indices}
-                )
+#                 state, interrupts = workflow.handle_interrupt(
+#                     state, {"selected_indices": indices}
+#                 )
                 
-                print(f"\n✅ Selected {len(state.selected_attractions)} attractions:")
-                for attr in state.selected_attractions:
-                    print(f"   • {attr['name']}")
-                break
-            except (ValueError, IndexError) as e:
-                print(f"❌ Invalid selection. Please try again (e.g., '0,1')\n")
+#                 print(f"\n✅ Selected {len(state.selected_attractions)} attractions:")
+#                 for attr in state.selected_attractions:
+#                     print(f"   • {attr['name']}")
+#                 break
+#             except (ValueError, IndexError) as e:
+#                 print(f"❌ Invalid selection. Please try again (e.g., '0,1')\n")
     
-    # Phase 3: Handle restaurant selection
-    if state.phase == "selecting_restaurants" and state.research:
-        print("\n" + "=" * 70)
-        print("🍽️  RESTAURANT SELECTION")
-        print("=" * 70)
+#     # Phase 3: Handle restaurant selection
+#     if state.phase == "selecting_restaurants" and state.research:
+#         print("\n" + "=" * 70)
+#         print("🍽️  RESTAURANT SELECTION")
+#         print("=" * 70)
         
-        # Show assistant message
-        last_turn = state.conversation_turns[-1]
-        if last_turn.role == "assistant":
-            print(f"\n🤖 Assistant: {last_turn.content}\n")
+#         # Show assistant message
+#         last_turn = state.conversation_turns[-1]
+#         if last_turn.role == "assistant":
+#             print(f"\n🤖 Assistant: {last_turn.content}\n")
         
-        restaurants = state.research.dining
-        print(f"\nFound {len(restaurants)} restaurants:\n")
+#         restaurants = state.research.dining
+#         print(f"\nFound {len(restaurants)} restaurants:\n")
         
-        for idx, rest in enumerate(restaurants):
-            print(f"  [{idx}] {rest['name']}")
-            print(f"      📍 {rest.get('address', 'N/A')}")
-            print(f"      ⭐ {rest.get('rating', 'N/A')} ({rest.get('review_count', 0)} reviews)")
-            price = rest.get('price_level')
-            if price:
-                print(f"      💰 {'$' * price}")
-            print()
+#         for idx, rest in enumerate(restaurants):
+#             print(f"  [{idx}] {rest['name']}")
+#             print(f"      📍 {rest.get('address', 'N/A')}")
+#             print(f"      ⭐ {rest.get('rating', 'N/A')} ({rest.get('review_count', 0)} reviews)")
+#             price = rest.get('price_level')
+#             if price:
+#                 print(f"      💰 {'$' * price}")
+#             print()
         
-        while True:
-            selection = input(f"👤 Select restaurants (e.g., '0' or '0,1'): ").strip()
-            if selection.lower() in ["quit", "exit", "q"]:
-                print("\nExiting interactive test.")
-                return
+#         while True:
+#             selection = input(f"👤 Select restaurants (e.g., '0' or '0,1'): ").strip()
+#             if selection.lower() in ["quit", "exit", "q"]:
+#                 print("\nExiting interactive test.")
+#                 return
             
-            try:
-                if "," in selection:
-                    indices = [int(x.strip()) for x in selection.split(",") if x.strip()]
-                else:
-                    indices = [int(x.strip()) for x in selection.split() if x.strip()]
+#             try:
+#                 if "," in selection:
+#                     indices = [int(x.strip()) for x in selection.split(",") if x.strip()]
+#                 else:
+#                     indices = [int(x.strip()) for x in selection.split() if x.strip()]
                 
-                state, interrupts = workflow.handle_interrupt(
-                    state, {"selected_indices": indices}
-                )
+#                 state, interrupts = workflow.handle_interrupt(
+#                     state, {"selected_indices": indices}
+#                 )
                 
-                print(f"\n✅ Selected {len(state.selected_restaurants)} restaurants:")
-                for rest in state.selected_restaurants:
-                    print(f"   • {rest['name']}")
-                break
-            except (ValueError, IndexError) as e:
-                print(f"❌ Invalid selection. Please try again (e.g., '0')\n")
+#                 print(f"\n✅ Selected {len(state.selected_restaurants)} restaurants:")
+#                 for rest in state.selected_restaurants:
+#                     print(f"   • {rest['name']}")
+#                 break
+#             except (ValueError, IndexError) as e:
+#                 print(f"❌ Invalid selection. Please try again (e.g., '0')\n")
     
-    # Phase 4: Show final results
-    if state.phase == "complete":
-        print("\n" + "=" * 70)
-        print("✨ FINAL ITINERARY")
-        print("=" * 70)
+#     # Phase 4: Show final results
+#     if state.phase == "complete":
+#         print("\n" + "=" * 70)
+#         print("✨ FINAL ITINERARY")
+#         print("=" * 70)
         
-        # Show assistant message
-        last_turn = state.conversation_turns[-1]
-        if last_turn.role == "assistant":
-            print(f"\n🤖 Assistant: {last_turn.content}\n")
+#         # Show assistant message
+#         last_turn = state.conversation_turns[-1]
+#         if last_turn.role == "assistant":
+#             print(f"\n🤖 Assistant: {last_turn.content}\n")
         
-        # Show preferences
-        print("📋 Your Preferences:")
-        prefs = state.preferences.fields
-        for key, value in prefs.items():
-            formatted_key = key.replace("_", " ").title()
-            print(f"   • {formatted_key}: {value}")
+#         # Show preferences
+#         print("📋 Your Preferences:")
+#         prefs = state.preferences.fields
+#         for key, value in prefs.items():
+#             formatted_key = key.replace("_", " ").title()
+#             print(f"   • {formatted_key}: {value}")
         
-        # Show itinerary
-        if state.itinerary:
-            print("\n📅 Itinerary:")
-            days = state.itinerary.get("days", [])
-            for day_info in days:
-                day_num = day_info.get("day", "?")
-                print(f"\n   Day {day_num}:")
-                for stop in day_info.get("stops", []):
-                    print(f"      • {stop.get('name', 'Unknown')}")
+#         # Show itinerary
+#         if state.itinerary:
+#             print("\n📅 Itinerary:")
+#             days = state.itinerary.get("days", [])
+#             for day_info in days:
+#                 day_num = day_info.get("day", "?")
+#                 print(f"\n   Day {day_num}:")
+#                 for stop in day_info.get("stops", []):
+#                     print(f"      • {stop.get('name', 'Unknown')}")
         
-        # Show budget
-        if state.budget:
-            print(f"\n💰 Budget Estimate:")
-            budget = state.budget
-            print(f"   {budget.get('currency', 'USD')} {budget.get('expected', 0):,.2f}")
+#         # Show budget
+#         if state.budget:
+#             print(f"\n💰 Budget Estimate:")
+#             budget = state.budget
+#             print(f"   {budget.get('currency', 'USD')} {budget.get('expected', 0):,.2f}")
         
-        # Show planning context
-        if state.planning_context:
-            print(f"\n💬 Planning Context:")
-            print(f"   {state.planning_context}")
+#         # Show planning context
+#         if state.planning_context:
+#             print(f"\n💬 Planning Context:")
+#             print(f"   {state.planning_context}")
         
-        print("\n" + "=" * 70)
-        print("✅ WORKFLOW COMPLETE!")
-        print("=" * 70)
+#         print("\n" + "=" * 70)
+#         print("✅ WORKFLOW COMPLETE!")
+#         print("=" * 70)
         
-        # Show conversation history
-        print(f"\n📜 Conversation History ({len(state.conversation_turns)} turns):")
-        for i, turn in enumerate(state.conversation_turns, 1):
-            role_icon = "🤖" if turn.role == "assistant" else "👤"
-            print(f"   {i}. {role_icon} {turn.role.title()}: {turn.content[:60]}...")
+#         # Show conversation history
+#         print(f"\n📜 Conversation History ({len(state.conversation_turns)} turns):")
+#         for i, turn in enumerate(state.conversation_turns, 1):
+#             role_icon = "🤖" if turn.role == "assistant" else "👤"
+#             print(f"   {i}. {role_icon} {turn.role.title()}: {turn.content[:60]}...")
         
-        print()
+#         print()
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Travel planner workflow utilities")
-    parser.add_argument("--smoke", action="store_true", help="Run a smoke test against stub agents")
-    parser.add_argument("--interactive", action="store_true", help="Run an interactive smoke test")
-    args = parser.parse_args()
+# if __name__ == "__main__":
+#     parser = argparse.ArgumentParser(description="Travel planner workflow utilities")
+#     parser.add_argument("--smoke", action="store_true", help="Run a smoke test against stub agents")
+#     parser.add_argument("--interactive", action="store_true", help="Run an interactive smoke test")
+#     args = parser.parse_args()
 
-    if args.smoke:
-        run_smoke_test()
-    elif args.interactive:
-        run_interactive_test()
-    else:
-        print("Run with --smoke to execute the automated workflow smoke test.")
-        print("Run with --interactive to chat with the workflow interactively.")
+#     if args.smoke:
+#         run_smoke_test()
+#     elif args.interactive:
+#         run_interactive_test()
+#     else:
+#         print("Run with --smoke to execute the automated workflow smoke test.")
+#         print("Run with --interactive to chat with the workflow interactively.")

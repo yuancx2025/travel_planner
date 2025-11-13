@@ -241,6 +241,59 @@ def _render_interrupts(client: httpx.Client, interrupts: List[Dict[str, Any]]) -
                 _send_turn(client, interrupt={"selected_indices": indices})
                 st.rerun()
 
+        # Add refinement option outside the selection form
+        st.markdown("---")
+        with st.expander("🔄 Not satisfied with these options? Refine your search", expanded=False):
+            st.markdown(
+                "Provide specific attractions or restaurants you'd like to see in the results. "
+                "The system will search for them and include them in updated results."
+            )
+
+            with st.form(key=f"refinement_{idx}"):
+                refinement_type = (
+                    "attraction" if interrupt_type == "select_attractions" else "restaurant"
+                )
+
+                if interrupt_type == "select_attractions":
+                    additional_items = st.text_area(
+                        "Specific attractions you want to include:",
+                        placeholder="e.g., Louvre Museum, Eiffel Tower (one per line or comma-separated)",
+                        help="Enter attraction names you want to see in the results",
+                        key=f"refine_attractions_{idx}",
+                    )
+                else:
+                    additional_items = st.text_area(
+                        "Specific restaurants you want to try:",
+                        placeholder="e.g., Le Jules Verne, L'Astrance (one per line or comma-separated)",
+                        help="Enter restaurant names you want to see in the results",
+                        key=f"refine_restaurants_{idx}",
+                    )
+
+                if st.form_submit_button(f"🔍 Search for these {refinement_type}s"):
+                    if not additional_items or not additional_items.strip():
+                        st.warning(f"Please enter at least one {refinement_type} name to refine your search.")
+                    else:
+                        # Parse the input - support both comma-separated and newline-separated
+                        items_list = []
+                        if "," in additional_items:
+                            items_list = [item.strip() for item in additional_items.split(",") if item.strip()]
+                        else:
+                            items_list = [item.strip() for item in additional_items.split("\n") if item.strip()]
+
+                        # Build refinement criteria
+                        refinement_criteria: Dict[str, List[str]] = {}
+                        if interrupt_type == "select_attractions":
+                            refinement_criteria["additional_attractions"] = items_list
+                        else:
+                            refinement_criteria["additional_restaurants"] = items_list
+
+                        # Send refinement request
+                        _send_turn(client, interrupt={
+                            "action": "refine",
+                            "refinement_criteria": refinement_criteria,
+                        })
+                        st.rerun()
+
 
 def main() -> None:
     st.set_page_config(page_title="Travel Planner Companion", page_icon="🧭", layout="wide")
