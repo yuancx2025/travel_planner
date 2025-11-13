@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_exponential
 
@@ -79,17 +79,31 @@ class ResearchAgent:
             with attempt:
                 return await asyncio.to_thread(func, *args, **kwargs)
 
-    def research(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute all research tasks based on user state."""
+    def research(
+        self,
+        state: Dict[str, Any],
+        focus: Optional[Dict[str, List[str]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute all research tasks based on user state.
+
+        Args:
+            state: User preferences dict
+            focus: Optional dict with keys like "attractions" or "dining" containing
+                user-provided names/keywords to prioritize on this run.
+
+        Returns:
+            Dict with keys: weather, attractions, dining, hotels, flights, car_rentals, fuel_prices, distances
+        """
+        # Validate and normalize input
         destination = (state.get("destination_city") or "").strip()
         if not destination:
-            return {}
-
+            return {"error": "destination_city is required"}
         clean_state = dict(state)
         clean_state["destination_city"] = destination
-
+        
         try:
-            return asyncio.run(self._research_async(clean_state))
+            return asyncio.run(self._research_async(clean_state, focus=focus))
         except RuntimeError as exc:
             message = str(exc)
             if "asyncio.run" in message and "event loop" in message:
@@ -99,19 +113,40 @@ class ResearchAgent:
                 ) from exc
             raise
 
-    async def research_async(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def research_async(
+        self,
+        state: Dict[str, Any],
+        focus: Optional[Dict[str, List[str]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Async version of research() that accepts user preferences dict.
+        """
+        # Validate and normalize input
         destination = (state.get("destination_city") or "").strip()
         if not destination:
-            return {}
-
+            return {"error": "destination_city is required"}
         clean_state = dict(state)
         clean_state["destination_city"] = destination
 
-        return await self._research_async(clean_state)
+        return await self._research_async(clean_state, focus=focus)
 
-    async def _research_async(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def _research_async(
+        self,
+        state: Dict[str, Any],
+        focus: Optional[Dict[str, List[str]]] = None,
+    ) -> Dict[str, Any]:
         results: Dict[str, Any] = {}
         semaphore = asyncio.Semaphore(self._concurrency_limit())
+
+        focus = focus or {}
+        preferred_attractions = self._normalize_preference_list(state.get("preferred_attractions"))
+        preferred_restaurants = self._normalize_preference_list(state.get("preferred_restaurants"))
+        focus_attractions = self._normalize_preference_list(focus.get("attractions"))
+        focus_restaurants = self._normalize_preference_list(
+            focus.get("dining") or focus.get("restaurants")
+        )
+        attraction_targets = self._merge_preferences(preferred_attractions, focus_attractions)
+        dining_targets = self._merge_preferences(preferred_restaurants, focus_restaurants)
 
         async def run(func, *args, **kwargs):
             async with semaphore:
@@ -123,7 +158,11 @@ class ResearchAgent:
             return None
 
         async def run_attractions():
-            return await run(self._get_attractions, state)
+            return await run(
+                self._get_attractions,
+                state,
+                attraction_targets,
+            )
 
         async def run_hotels():
             if state.get("start_date"):
@@ -139,15 +178,20 @@ class ResearchAgent:
         flights_task = asyncio.create_task(run_flights())
 
         async def run_dining():
-            if not state.get("cuisine_pref"):
+            if not state.get("cuisine_pref") and not dining_targets:
                 return None
             try:
                 attractions_result = await attractions_task
             except Exception:
                 return None
-            if not attractions_result:
+            if not attractions_result and not dining_targets:
                 return None
-            return await run(self._get_dining, state, attractions_result)
+            return await run(
+                self._get_dining,
+                state,
+                attractions_result,
+                dining_targets,
+            )
 
         async def run_distances():
             try:
@@ -226,6 +270,150 @@ class ResearchAgent:
 
     # ==================== HELPERS ====================
 
+    @staticmethod
+    def _normalize_preference_list(values: Optional[Any]) -> List[str]:
+        if not values:
+            return []
+        normalized: List[str] = []
+        if isinstance(values, str):
+            values = [part.strip() for part in values.split(",")]
+        elif not isinstance(values, (list, tuple, set)):
+            values = [values]
+        for value in values:
+            if not isinstance(value, str):
+                value = str(value)
+            cleaned = value.strip()
+            if cleaned:
+                normalized.append(cleaned)
+        return normalized
+
+    @staticmethod
+    def _merge_preferences(primary: List[str], secondary: List[str]) -> List[str]:
+        seen = set()
+        merged: List[str] = []
+        for value in primary + secondary:
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(value)
+        return merged
+
+    @staticmethod
+    def _canonical_name(value: Optional[str]) -> str:
+        if not value:
+            return ""
+        return str(value).strip().lower()
+
+    def _prioritize_results(
+        self,
+        base_results: Optional[List[Dict[str, Any]]],
+        priority_names: List[str],
+        fetch_fn,
+    ) -> List[Dict[str, Any]]:
+        priority_names = priority_names or []
+        remaining = list(base_results or [])
+        final: List[Dict[str, Any]] = []
+        seen = set()
+
+        def add_item(item: Dict[str, Any]):
+            if not isinstance(item, dict):
+                return
+            name_key = self._canonical_name(item.get("name"))
+            if name_key and name_key in seen:
+                return
+            if name_key:
+                seen.add(name_key)
+            final.append(item)
+
+        # First, handle user priorities
+        for pref in priority_names:
+            pref_key = self._canonical_name(pref)
+            if not pref_key:
+                continue
+            match_idx = None
+            for idx, candidate in enumerate(remaining):
+                candidate_name = self._canonical_name(candidate.get("name"))
+                if pref_key in candidate_name:
+                    match_idx = idx
+                    break
+            if match_idx is not None:
+                match = remaining.pop(match_idx)
+                add_item(match)
+                continue
+
+            fetched = None
+            try:
+                fetched = fetch_fn(pref)
+            except Exception:
+                fetched = None
+            if fetched:
+                add_item(fetched)
+            else:
+                add_item({
+                    "name": pref,
+                    "source": "google_search",
+                    "raw": {
+                        "note": "User preference could not be resolved via providers; please verify manually.",
+                    },
+                })
+
+        # Append remaining catalog results, preserving order and avoiding duplicates
+        for item in remaining:
+            add_item(item)
+
+        limit = max(10, len(priority_names) + 5)
+        return final[:limit]
+
+    def _lookup_attraction(
+        self,
+        name: str,
+        city: Optional[str],
+        coords: Optional[Dict[str, float]],
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            query = f"{name} {city}" if city else name
+            kwargs: Dict[str, Any] = {"limit": 1}
+            if coords and coords.get("lat") is not None and coords.get("lng") is not None:
+                kwargs.update({
+                    "lat": coords["lat"],
+                    "lng": coords["lng"],
+                    "radius_m": 10000,
+                })
+            results = search_attractions(query, **kwargs)
+            if results:
+                result = results[0]
+                result.setdefault("source", "google_search")
+                return result
+        except Exception:
+            return None
+        return None
+
+    def _lookup_restaurant(
+        self,
+        name: str,
+        coords: Dict[str, float],
+        city: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            query = f"{name} {city}" if city else name
+            if coords.get("lat") is None or coords.get("lng") is None:
+                return None
+            results = search_restaurants(
+                query=query,
+                lat=coords["lat"],
+                lng=coords["lng"],
+                radius_m=5000,
+                limit=1,
+            )
+            if results:
+                result = results[0]
+                result.setdefault("source", "google_search")
+                return result
+        except Exception:
+            return None
+        return None
+
     def _geocode_city(self, city: str) -> Optional[Dict[str, float]]:
         """Get lat/lng for a city."""
         query = f"{city} attractions"
@@ -273,7 +461,11 @@ class ResearchAgent:
         except Exception as e:
             return [{"error": f"Weather fetch failed: {e}"}]
 
-    def _get_attractions(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _get_attractions(
+        self,
+        state: Dict[str, Any],
+        priority_names: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """Get attractions."""
         try:
             coords = self._geocode_city(state["destination_city"])
@@ -290,11 +482,26 @@ class ResearchAgent:
                     "lng": coords["lng"],
                     "radius_m": 20000,
                 })
-            return search_attractions(query or state["destination_city"], **search_kwargs)
+            base_results = search_attractions(query or state["destination_city"], **search_kwargs)
+            priority_names = priority_names or []
+            if not priority_names:
+                return base_results
+
+            fetch_fn = lambda name: self._lookup_attraction(
+                name,
+                state.get("destination_city"),
+                coords,
+            )
+            return self._prioritize_results(base_results, priority_names, fetch_fn)
         except Exception as e:
             return [{"error": f"Attractions fetch failed: {e}"}]
 
-    def _get_dining(self, state: Dict[str, Any], attractions: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    def _get_dining(
+        self,
+        state: Dict[str, Any],
+        attractions: Optional[List[Dict[str, Any]]] = None,
+        priority_names: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """Get restaurants."""
         try:
             coords = self._geocode_city(state["destination_city"])
@@ -308,13 +515,23 @@ class ResearchAgent:
 
             cuisine = state.get("cuisine_pref", "restaurants")
             query = f"{cuisine} in {state['destination_city']}"
-            return search_restaurants(
+            base_results = search_restaurants(
                 query=query,
                 lat=coords["lat"],
                 lng=coords["lng"],
                 radius_m=5000,
                 limit=10
             )
+            priority_names = priority_names or []
+            if not priority_names:
+                return base_results
+
+            fetch_fn = lambda name: self._lookup_restaurant(
+                name,
+                coords,
+                state.get("destination_city"),
+            )
+            return self._prioritize_results(base_results, priority_names, fetch_fn)
         except Exception as e:
             return [{"error": f"Dining fetch failed: {e}"}]
 
@@ -422,233 +639,4 @@ class ResearchAgent:
             return enriched
         except Exception as e:
             return [{"error": f"Distance calc failed: {e}"}]
-
-
-# # ==================== SMOKE TEST ====================
-# if __name__ == "__main__":
-#     """
-#     Smoke test for ResearchAgent with mock user preferences.
-#     Tests all API integrations: weather, attractions, dining, hotels, car rentals, fuel prices, distances.
-    
-#     Usage:
-#         cd /Users/yuanwenbo/Desktop/590_project/agents
-#         python research_agent.py
-    
-#     Customize the mock_user_preferences below to test different scenarios.
-#     """
-#     import json
-#     import sys
-#     from pathlib import Path
-    
-#     # Add parent directory to path so we can import tools
-#     sys.path.insert(0, str(Path(__file__).parent.parent))
-    
-#     print("=" * 80)
-#     print("🔍 ResearchAgent Smoke Test")
-#     print("=" * 80)
-    
-#     # Mock user preferences (customize these to test different scenarios)
-#     mock_user_preferences = {
-#         "name": "Test User",
-#         "destination_city": "Orlando",  # Change this to test different cities
-#         "travel_days": 3,
-#         "start_date": "2025-11-15",  # YYYY-MM-DD or "not decided"
-#         "budget_usd": 1000,
-#         "num_people": 2,
-#         "kids": "no",
-#         "activity_pref": "outdoor",  # "outdoor" or "indoor"
-#         "need_car_rental": "yes",  # "yes" or "no"
-#         "hotel_room_pref": "1 king",
-#         "cuisine_pref": "seafood",  # e.g., "ramen", "seafood", "vegan"
-#         "origin_city": "Durham",
-#         "temp_unit": "celsius",  # "fahrenheit" or "celsius"
-#         "home_airport": "RDU",
-#         "destination_airport": "MCO",
-#     }
-    
-#     print("\n📋 Testing with user preferences:")
-#     print(json.dumps(mock_user_preferences, indent=2))
-#     print("\n" + "=" * 80)
-    
-#     # Initialize the agent
-#     print("\n🚀 Initializing ResearchAgent...")
-#     try:
-#         agent = ResearchAgent()
-#         print("✅ Agent initialized successfully")
-#     except Exception as e:
-#         print(f"❌ Failed to initialize agent: {e}")
-#         sys.exit(1)
-    
-#     # Run research
-#     print("\n🔎 Running research (this may take 10-30 seconds)...")
-#     print("   - Fetching weather forecast")
-#     print("   - Finding attractions")
-#     print("   - Searching restaurants")
-#     print("   - Looking up hotels")
-#     print("   - Checking flight offers")
-#     print("   - Getting car rental & fuel prices")
-#     print("   - Calculating distances between attractions")
-    
-#     try:
-#         results = agent.research(mock_user_preferences)
-#         print("\n✅ Research completed successfully!")
-#     except Exception as e:
-#         print(f"\n❌ Research failed: {e}")
-#         import traceback
-#         traceback.print_exc()
-#         sys.exit(1)
-    
-#     # Display results summary
-#     print("\n" + "=" * 80)
-#     print("📊 RESULTS SUMMARY")
-#     print("=" * 80)
-    
-#     # Weather
-#     if "weather" in results:
-#         weather = results["weather"]
-#         if isinstance(weather, list) and weather:
-#             if "error" in weather[0]:
-#                 print(f"\n❌ Weather: {weather[0]['error']}")
-#             else:
-#                 print(f"\n☀️  Weather: {len(weather)} day(s) forecast retrieved")
-#                 for day in weather[:3]:  # Show first 3 days
-#                     date = day.get("date", "N/A")
-#                     temp = day.get("temp_high", "N/A")
-#                     conditions = day.get("conditions", "N/A")
-#                     print(f"   - {date}: {temp}°, {conditions}")
-#         else:
-#             print("\n⚠️  Weather: No data")
-    
-#     # Attractions
-#     if "attractions" in results:
-#         attractions = results["attractions"]
-#         if isinstance(attractions, list) and attractions:
-#             if "error" in attractions[0]:
-#                 print(f"\n❌ Attractions: {attractions[0]['error']}")
-#             else:
-#                 print(f"\n🎡 Attractions: {len(attractions)} found")
-#                 for attr in attractions[:10]:  # Show first 10
-#                     name = attr.get("name", "N/A")
-#                     rating = attr.get("rating", "N/A")
-#                     print(f"   - {name} (Rating: {rating}⭐)")
-#         else:
-#             print("\n⚠️  Attractions: No data")
-    
-#     # Dining
-#     if "dining" in results:
-#         dining = results["dining"]
-#         if isinstance(dining, list) and dining:
-#             if "error" in dining[0]:
-#                 print(f"\n❌ Dining: {dining[0]['error']}")
-#             else:
-#                 print(f"\n🍽️  Dining: {len(dining)} restaurants found")
-#                 for rest in dining[:10]:  # Show first 10
-#                     name = rest.get("name", "N/A")
-#                     rating = rest.get("rating", "N/A")
-#                     print(f"   - {name} (Rating: {rating}⭐)")
-#         else:
-#             print("\n⚠️  Dining: No data")
-    
-#     # Hotels
-#     if "hotels" in results:
-#         hotels = results["hotels"]
-#         if isinstance(hotels, list) and hotels:
-#             if "error" in hotels[0]:
-#                 print(f"\n❌ Hotels: {hotels[0]['error']}")
-#             else:
-#                 print(f"\n🏨 Hotels: {len(hotels)} found")
-#                 for hotel in hotels[:5]:  # Show first 5
-#                     name = hotel.get("name", "N/A")
-#                     price = hotel.get("price")
-#                     currency = hotel.get("currency") or "USD"
-#                     if price:
-#                         print(f"   - {name} ({currency} {price}/night)")
-#                     else:
-#                         print(f"   - {name} (rate unavailable)")
-#         else:
-#             print("\n⚠️  Hotels: No data")
-
-#     # Flights
-#     if "flights" in results:
-#         flights = results["flights"]
-#         if isinstance(flights, list) and flights:
-#             if "error" in flights[0]:
-#                 print(f"\n❌ Flights: {flights[0]['error']}")
-#             else:
-#                 print(f"\n✈️  Flights: {len(flights)} offers found")
-#                 for offer in flights[:3]:  # Show first 3
-#                     carrier = offer.get("carrier", "N/A")
-#                     price = offer.get("price")
-#                     currency = offer.get("currency") or "USD"
-#                     duration = offer.get("duration", "N/A")
-#                     if price:
-#                         print(f"   - {carrier} {currency} {price} ({duration})")
-#                     else:
-#                         print(f"   - {carrier} (price unavailable, {duration})")
-#         else:
-#             print("\n⚠️  Flights: No data")
-    
-#     # Car Rentals & Fuel Prices
-#     if "car_rentals" in results:
-#         car_rentals = results["car_rentals"]
-#         if isinstance(car_rentals, list) and car_rentals:
-#             if "error" in car_rentals[0]:
-#                 print(f"\n❌ Car Rentals: {car_rentals[0]['error']}")
-#             else:
-#                 rental = car_rentals[0]
-#                 print(f"\n🚗 Car Rentals & Fuel Prices:")
-#                 print(f"   Location: {rental.get('location', 'N/A')}, {rental.get('state', 'N/A')}")
-#                 if rental.get("economy_car_daily"):
-#                     print(f"   - Economy: ${rental.get('economy_car_daily')}/day")
-#                 if rental.get("compact_car_daily"):
-#                     print(f"   - Compact: ${rental.get('compact_car_daily')}/day")
-#                 if rental.get("midsize_car_daily"):
-#                     print(f"   - Midsize: ${rental.get('midsize_car_daily')}/day")
-#                 if rental.get("regular"):
-#                     print(f"   - Regular gas: ${rental.get('regular')}/gallon")
-#                 if rental.get("premium"):
-#                     print(f"   - Premium gas: ${rental.get('premium')}/gallon")
-#         else:
-#             print("\n⚠️  Car Rentals: No data")
-    
-#     if "fuel_prices" in results:
-#         fuel = results["fuel_prices"]
-#         if "error" not in fuel:
-#             print(f"\n⛽ Fuel Prices (separate):")
-#             print(f"   - Regular: ${fuel.get('regular', 'N/A')}/gallon")
-#             print(f"   - Premium: ${fuel.get('premium', 'N/A')}/gallon")
-#             print(f"   - Diesel: ${fuel.get('diesel', 'N/A')}/gallon")
-    
-#     # Distances
-#     if "distances" in results:
-#         distances = results["distances"]
-#         if isinstance(distances, list) and distances:
-#             if "error" in distances[0]:
-#                 print(f"\n❌ Distances: {distances[0]['error']}")
-#             else:
-#                 print(f"\n📏 Distances: {len(distances)} route segments calculated")
-#                 for dist in distances[:3]:  # Show first 3
-#                     origin = dist.get("origin_name", "N/A")
-#                     dest = dist.get("dest_name", "N/A")
-#                     km = dist.get("distance_m", 0) / 1000
-#                     mins = dist.get("duration_s", 0) / 60
-#                     print(f"   - {origin} → {dest}: {km:.1f}km, {mins:.0f}min")
-#         else:
-#             print("\n⚠️  Distances: No data")
-    
-#     # Full JSON output option
-#     print("\n" + "=" * 80)
-#     print("💾 Save full results to JSON? (y/n): ", end="")
-#     try:
-#         response = input().strip().lower()
-#         if response == "y":
-#             output_file = Path(__file__).parent.parent / "research_results.json"
-#             output_file.write_text(json.dumps(results, indent=2, ensure_ascii=False))
-#             print(f"✅ Results saved to: {output_file}")
-#     except (KeyboardInterrupt, EOFError):
-#         print("\nSkipped.")
-    
-#     print("\n" + "=" * 80)
-#     print("✅ Smoke test complete!")
-#     print("=" * 80)
 

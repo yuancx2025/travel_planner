@@ -39,6 +39,7 @@ class TravelPlannerState(BaseModel):
         "collecting",
         "researching",
         "selecting_attractions",
+        "refining_research",
         "selecting_restaurants",
         "building_itinerary",
         "complete",
@@ -51,3 +52,6 @@ class TravelPlannerState(BaseModel):
     itinerary: Optional[Dict[str, Any]] = None
     planning_context: Optional[str] = None
     budget: Optional[Dict[str, Any]] = None
+    research_iteration: int = 0
+    research_refinement_history: List[Dict[str, Any]] = Field(default_factory=list)
+    max_refinement_iterations: int = 2
