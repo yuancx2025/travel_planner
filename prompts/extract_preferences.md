@@ -36,6 +36,33 @@ Output:
 }}
 ````
 
+Input: "I definitely want to see the Eiffel Tower and visit the Louvre Museum in Paris"
+Output:
+````json
+{{
+  "destination_city": "Paris",
+  "preferred_attractions": ["Eiffel Tower", "Louvre Museum"]
+}}
+````
+
+Input: "Must try Ichiran ramen and Sushi Saito while we're there"
+Output:
+````json
+{{
+  "preferred_restaurants": ["Ichiran", "Sushi Saito"]
+}}
+````
+
+Input: "Going to New York, want to see the Statue of Liberty and eat at Katz's Deli"
+Output:
+````json
+{{
+  "destination_city": "New York",
+  "preferred_attractions": ["Statue of Liberty"],
+  "preferred_restaurants": ["Katz's Deli"]
+}}
+````
+
 ## Current State (for context only, don't duplicate):
 {current_state}
 
