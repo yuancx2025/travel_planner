@@ -60,11 +60,45 @@ class ChatAgent:
         self.optional_fields: List[str] = [
             "origin_city",         # where they start (nice to have)
             "home_airport",        # optional IATA
-            "specific_requirements"  # accessibility/dietary/constraints
+            "specific_requirements",  # accessibility/dietary/constraints
+            "preferred_attractions",  # traveler already has these in mind
+            "preferred_restaurants",  # traveler has specific restaurants in mind
         ]
 
         self.all_fields = self.required_fields + self.optional_fields
         self.conversation_history: List[Any] = []  # [SystemMessage/HumanMessage/AIMessage]
+
+    @staticmethod
+    def _merge_preference_list(existing: Optional[Any], incoming: Any) -> List[str]:
+        """Merge preference lists (attractions/restaurants) with de-duplication."""
+
+        def to_list(value: Any) -> List[str]:
+            if value is None:
+                return []
+            if isinstance(value, list):
+                items = value
+            elif isinstance(value, str):
+                items = [part.strip() for part in value.split(",")]
+            else:
+                items = [str(value)]
+            normalized = []
+            for item in items:
+                if not isinstance(item, str):
+                    item = str(item)
+                cleaned = item.strip()
+                if cleaned:
+                    normalized.append(cleaned)
+            return normalized
+
+        combined = []
+        seen = set()
+        for item in to_list(existing) + to_list(incoming):
+            key = item.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            combined.append(item)
+        return combined
 
     # ---------------------------
     # Conversation initialization
@@ -122,7 +156,15 @@ class ChatAgent:
         if has_user_text:
             new_info = self.extract_info_from_message(user_input, current_state=state)
             for field, value in new_info.items():
-                if value not in (None, "", []):
+                if value in (None, "", []):
+                    continue
+                if field in {"preferred_attractions", "preferred_restaurants"}:
+                    merged = self._merge_preference_list(state.get(field), value)
+                    if merged:
+                        state[field] = merged
+                    else:
+                        state.pop(field, None)
+                else:
                     state[field] = value
 
             # Add user turn to history
@@ -277,6 +319,8 @@ class ChatAgent:
             "need_car_rental": "whether you need a car rental (yes/no)",
             "hotel_room_pref": "your hotel room preference (e.g., '1 king' or '2 queens')",
             "cuisine_pref": "any cuisine preference (e.g., ramen, seafood, vegan)",
+            "preferred_attractions": "any must-see attractions you'd like included",
+            "preferred_restaurants": "restaurants you'd love to try",
         }
 
         # Step 8 summary text
@@ -284,6 +328,10 @@ class ChatAgent:
             def _get(k, default="(not provided)"): return st.get(k) or default
             kids_str = _get("kids", "no")
             car_str = _get("need_car_rental", "no")
+            pref_attractions = st.get("preferred_attractions") or []
+            pref_restaurants = st.get("preferred_restaurants") or []
+            pref_attr_str = ", ".join(pref_attractions) if pref_attractions else "(none yet)"
+            pref_dine_str = ", ".join(pref_restaurants) if pref_restaurants else "(none yet)"
             return (
                 "Here’s what I have so far:\n"
                 f"- Name: {_get('name')}\n"
@@ -293,7 +341,9 @@ class ChatAgent:
                 f"- Group: {_get('num_people')} traveler(s), kids: {kids_str}\n"
                 f"- Activities: {_get('activity_pref')} | Car rental: {car_str}\n"
                 f"- Hotel room: {_get('hotel_room_pref')}\n"
-                f"- Cuisine: {_get('cuisine_pref')}\n\n"
+                f"- Cuisine: {_get('cuisine_pref')}\n"
+                f"- Preferred attractions: {pref_attr_str}\n"
+                f"- Preferred restaurants: {pref_dine_str}\n\n"
                 "If this looks right, say 'confirm'. If not, tell me what to change."
             )
 
@@ -313,103 +363,3 @@ class ChatAgent:
             )
 
         return SystemMessage(content=text)
-
-# # A mini test to see if chat agent works as expected
-# if __name__ == "__main__":
-#     """
-#     Terminal REPL for ChatAgent.
-#     Commands:
-#       /state      -> print current state JSON
-#       /missing    -> print missing required fields
-#       /reset      -> clear state and conversation
-#       /save PATH  -> save state to a file (JSON)
-#       /load PATH  -> load state from a file (JSON)
-#       /help       -> show commands
-#       /quit       -> exit
-#     """
-#     import json
-#     import pathlib
-#     import sys
-    
-#     # sys.path already added at top of file
-
-#     # 1) init the agent (uses your default gemini model)
-#     agent = ChatAgent()
-#     state: Dict[str, Any] = {}
-
-#     print("🔹 ChatAgent REPL (Gemini). Type /help for commands. Ctrl+C to exit.")
-#     while True:
-#         try:
-#             user = input("\nYou: ").strip()
-
-#             # --- commands ---
-#             if not user:
-#                 continue
-#             if user == "/quit":
-#                 print("Bye! 👋")
-#                 sys.exit(0)
-#             if user == "/help":
-#                 print(
-#                     "Commands:\n"
-#                     "  /state         show current state\n"
-#                     "  /missing       show missing required fields\n"
-#                     "  /reset         clear state & conversation\n"
-#                     "  /save PATH     save state to PATH (json)\n"
-#                     "  /load PATH     load state from PATH (json)\n"
-#                     "  /quit          exit"
-#                 )
-#                 continue
-#             if user == "/state":
-#                 print(json.dumps(state, indent=2, ensure_ascii=False))
-#                 continue
-#             if user == "/missing":
-#                 missing = [f for f in agent.required_fields if not state.get(f)]
-#                 print("Missing:", ", ".join(missing) if missing else "(none)")
-#                 continue
-#             if user == "/reset":
-#                 state = {}
-#                 agent.conversation_history.clear()
-#                 print("Reset OK.")
-#                 continue
-#             if user.startswith("/save "):
-#                 path = pathlib.Path(user.split(" ", 1)[1].strip())
-#                 path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
-#                 print(f"Saved -> {path}")
-#                 continue
-#             if user.startswith("/load "):
-#                 path = pathlib.Path(user.split(" ", 1)[1].strip())
-#                 state = json.loads(path.read_text())
-#                 print(f"Loaded <- {path}")
-#                 continue
-#             # Optional: auto-complete exit if user confirms and all fields are present
-#             if user.lower() in {"confirm", "yes", "y"}:
-#                 missing = [f for f in agent.required_fields if not state.get(f)]
-#                 if not missing:
-#                     print("Confirmed. Final state:")
-#                     print(json.dumps(state, indent=2, ensure_ascii=False))
-#                     print("Bye! 👋")
-#                     sys.exit(0)
-
-#             # 2) normal chat turn -> collect info
-#             out = agent.collect_info(user, state=state)
-#             state = out["state"]  # update local state
-
-#             # 3) stream assistant reply
-#             stream = out["stream"]
-#             print("Assistant:", end=" ", flush=True)
-#             if stream is not None:
-#                 for chunk in stream:
-#                     # langchain streaming returns message chunks with `.content`
-#                     piece = getattr(chunk, "content", None)
-#                     if piece:
-#                         print(piece, end="", flush=True)
-#             print()  # newline
-
-#             # 4) show completion hint
-#             if out["complete"]:
-#                 print("✅ All required fields collected. Type 'confirm' to finish, or /state to review.")
-
-#         except KeyboardInterrupt:
-#             print("\nInterrupted. Type /quit to exit.")
-#         except Exception as e:
-#             print(f"\n[error] {e}")
