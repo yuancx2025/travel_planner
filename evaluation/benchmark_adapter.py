@@ -12,15 +12,13 @@ if str(ROOT) not in sys.path:
 
 from workflows.workflow import TravelPlannerWorkflow
 from workflows.state import TravelPlannerState, PreferencesState
-from evaluation.mock_hotels import get_mock_hotels
 
 
 class TravelPlannerBenchmarkAdapter:
     """Convert TravelPlanner benchmark format to our workflow format."""
 
-    def __init__(self, use_mock_hotels: bool = True):
+    def __init__(self):
         self.workflow = TravelPlannerWorkflow()
-        self.use_mock_hotels = use_mock_hotels  # Store flag
 
     def benchmark_to_preferences(self, query: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -93,163 +91,7 @@ class TravelPlannerBenchmarkAdapter:
 
         return preferences
 
-    def _inject_mock_hotels_if_needed(
-        self, state: TravelPlannerState
-    ) -> TravelPlannerState:
-        """
-        Inject mock hotel data if Amadeus API failed or is disabled.
-
-        This is called after research phase to patch missing hotel data.
-        """
-        if not self.use_mock_hotels:
-            return state
-
-        # Check if research has hotels
-        if state.research and state.research.raw.get("hotels"):
-            hotels = state.research.raw["hotels"]
-            # Check if it's an error or empty
-            if isinstance(hotels, list) and len(hotels) > 0:
-                # Check if first item has error
-                if "error" not in hotels[0]:
-                    return state  # Hotels are fine, don't inject mock
-
-        # Hotels missing or errored - inject mock data
-        preferences = state.preferences.fields
-        destination = preferences.get("destination_city", "City")
-        num_people = preferences.get("num_people", 2)
-
-        mock_hotels = get_mock_hotels(destination, num_people)
-
-        print(f"  ℹ️  Using mock hotel data for {destination}")
-
-        # Inject into research state
-        if state.research:
-            state.research.raw["hotels"] = mock_hotels
-
-        return state
-
     def run_query(self, query: Dict[str, Any], verbose: bool = True) -> Dict[str, Any]:
-        """Execute a single benchmark query."""
-
-        try:
-            if verbose:
-                print(f"\n{'='*60}")
-                print(
-                    f"Processing: {query['dest']} ({query['days']} days, ${query.get('budget')} budget)"
-                )
-                print(f"{'='*60}")
-
-            # Step 1: Convert format
-            preferences = self.benchmark_to_preferences(query)
-            if verbose:
-                print(f"✓ Converted preferences")
-
-            # Step 2: Initialize workflow
-            thread_id = f"benchmark-{query.get('idx', 0)}"
-            state = self.workflow.initial_state(thread_id)
-
-            # Step 3: Populate preferences
-            state.preferences = PreferencesState(
-                fields=preferences, missing_fields=[], complete=True
-            )
-            if verbose:
-                print(f"✓ Initialized workflow with preferences")
-
-            # Step 4: Run research
-            if verbose:
-                print(
-                    f"⏳ Running research (fetching attractions, restaurants, hotels)..."
-                )
-
-            state, interrupts = self.workflow._run_research(state)
-
-            # NEW: Inject mock hotels if needed
-            state = self._inject_mock_hotels_if_needed(state)
-
-            if not interrupts:
-                return {
-                    "success": False,
-                    "error": "Research phase failed to produce interrupts",
-                    "state": state,
-                }
-
-            if verbose:
-                attractions_count = (
-                    len(state.research.attractions) if state.research else 0
-                )
-                dining_count = len(state.research.dining) if state.research else 0
-                print(
-                    f"✓ Research complete: {attractions_count} attractions, {dining_count} restaurants"
-                )
-
-            # Step 5: Auto-select attractions
-            if state.phase == "selecting_attractions" and state.research:
-                num_to_select = min(
-                    preferences["travel_days"] * 2, len(state.research.attractions)
-                )
-                indices = list(range(num_to_select))
-
-                if verbose:
-                    print(f"⏳ Auto-selecting {num_to_select} attractions...")
-
-                state, interrupts = self.workflow.handle_interrupt(
-                    state, {"selected_indices": indices}
-                )
-
-                if verbose:
-                    print(f"✓ Selected {len(state.selected_attractions)} attractions")
-
-            # Step 6: Auto-select restaurants
-            if state.phase == "selecting_restaurants" and state.research:
-                num_to_select = min(3, len(state.research.dining))
-                indices = list(range(num_to_select))
-
-                if verbose:
-                    print(f"⏳ Auto-selecting {num_to_select} restaurants...")
-
-                state, interrupts = self.workflow.handle_interrupt(
-                    state, {"selected_indices": indices}
-                )
-
-                if verbose:
-                    print(f"✓ Selected {len(state.selected_restaurants)} restaurants")
-
-            # Step 7: Check completion
-            if state.phase != "complete":
-                return {
-                    "success": False,
-                    "error": f"Workflow stopped at phase: {state.phase}",
-                    "state": state,
-                }
-
-            if verbose:
-                print(f"✓ Workflow complete!")
-                if state.budget:
-                    print(f"  Budget: ${state.budget.get('expected', 0)}")
-                if state.itinerary:
-                    num_days = len(state.itinerary.get("days", []))
-                    print(f"  Itinerary: {num_days} days planned")
-
-            return {
-                "success": True,
-                "state": state,
-                "preferences": state.preferences.fields,
-                "itinerary": state.itinerary,
-                "budget": state.budget,
-            }
-
-        except Exception as e:
-            import traceback
-
-            if verbose:
-                print(f"\n❌ Error: {e}")
-                traceback.print_exc()
-
-            return {
-                "success": False,
-                "error": str(e),
-                "traceback": traceback.format_exc(),
-            }
         """
         Execute a single benchmark query.
 

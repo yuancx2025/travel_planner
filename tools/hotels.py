@@ -21,6 +21,42 @@ PLACES_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
 # Optional: limit fields we fetch from Place Details to save quota/time
 DETAILS_FIELDS = "place_id,name,formatted_address,rating,price_level,user_ratings_total,geometry,website,international_phone_number"
 
+# Common city name → IATA airport code (fast path, no API call)
+CITY_TO_IATA = {
+    # US cities
+    "new york": "JFK",
+    "nyc": "JFK",
+    "new york city": "JFK",
+    "los angeles": "LAX",
+    "la": "LAX",
+    "san francisco": "SFO",
+    "sf": "SFO",
+    "chicago": "ORD",
+    "miami": "MIA",
+    "las vegas": "LAS",
+    "seattle": "SEA",
+    "boston": "BOS",
+    "washington": "IAD",
+    "dc": "IAD",
+    "washington dc": "IAD",
+    "atlanta": "ATL",
+    "dallas": "DFW",
+    "houston": "IAH",
+    "phoenix": "PHX",
+    "philadelphia": "PHL",
+    "san diego": "SAN",
+    "denver": "DEN",
+    "orlando": "MCO",
+    "durham": "RDU",
+    "raleigh": "RDU",
+    "raleigh-durham": "RDU",
+    "chapel hill": "RDU",
+    "salt lake city": "SLC",
+    "slc": "SLC",
+    "portland": "PDX",
+    "austin": "AUS",
+    "nashville": "BNA",
+}
 
 def _text_search_hotels_in_city(city: str, page_size: int = 20):
     """
