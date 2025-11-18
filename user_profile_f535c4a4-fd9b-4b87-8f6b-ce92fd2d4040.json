@@ -1,0 +1,21 @@
+{
+  "Traveler Profile": {
+    "Thread ID": "f535c4a4-fd9b-4b87-8f6b-ce92fd2d4040",
+    "Generated At": "2025-11-18T20:21:41.968593",
+    "Name": "Michael",
+    "Destination City": "Orlando",
+    "Travel Days": 3,
+    "Start Date": "2025-11-15",
+    "Budget USD": 1000,
+    "Num People": 2,
+    "Kids": "no",
+    "Activity Pref": [
+      "outdoor activities"
+    ],
+    "Need Car Rental": "yes",
+    "Hotel Room Pref": "1 king bed",
+    "Cuisine Pref": [
+      "Asian"
+    ]
+  }
+}

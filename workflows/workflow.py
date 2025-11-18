@@ -29,6 +29,9 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from pathlib import Path
 import sys
 
+import json
+from datetime import datetime
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -157,6 +160,7 @@ class TravelPlannerWorkflow:
 
         interrupts: List[SelectionInterrupt] = []
         if preferences.complete:
+            self._save_user_profile(state.preferences.fields, state.thread_id)
             state, interrupts = self._run_research(state)
 
         return state, interrupts
@@ -244,6 +248,37 @@ class TravelPlannerWorkflow:
 
         # Re-run research with focus
         return self._run_research(state, focus=focus)
+
+    def _save_user_profile(self, fields: dict, thread_id: str):
+        """Save the gathered user preferences into a JSON file."""
+        # Convert your raw fields into human-readable format
+        profile = {
+            "Traveler Profile": {
+                "Thread ID": thread_id,
+                "Generated At": datetime.utcnow().isoformat(),
+                "Name": fields.get("name"),
+                "Destination City": fields.get("destination_city")
+                or fields.get("city"),
+                "Travel Days": fields.get("travel_days"),
+                "Start Date": fields.get("start_date"),
+                "Budget USD": fields.get("budget_usd") or fields.get("budget"),
+                "Num People": fields.get("num_people"),
+                "Kids": fields.get("kids"),
+                "Activity Pref": fields.get("activity_pref")
+                or fields.get("activities"),
+                "Need Car Rental": fields.get("need_car_rental"),
+                "Hotel Room Pref": fields.get("hotel_room_pref"),
+                "Cuisine Pref": fields.get("cuisine_pref"),
+            }
+        }
+
+        # Choose filename (thread_id makes it unique)
+        filename = f"user_profile_{thread_id}.json"
+
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(profile, f, indent=2)
+
+        print(f"[TravelPlanner] Saved user profile to: {filename}")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -604,7 +639,7 @@ class TravelPlannerWorkflow:
 
 # def run_interactive_test() -> None:
 #     """Run an interactive smoke test where you can chat with the workflow.
-    
+
 #     This simulates the full travel planning experience:
 #     - Chat with the assistant to provide preferences
 #     - System researches attractions/restaurants
@@ -612,27 +647,27 @@ class TravelPlannerWorkflow:
 #     - System generates itinerary and budget
 #     """
 #     import json
-    
+
 #     workflow = TravelPlannerWorkflow(
 #         chat_agent=_StubChatAgent(),
 #         research_agent=_StubResearchAgent(),
 #         itinerary_agent=_StubItineraryAgent(),
 #         budget_agent=_StubBudgetAgent(),
 #     )
-    
+
 #     print("=" * 70)
 #     print("🌍 INTERACTIVE TRAVEL PLANNER SMOKE TEST")
 #     print("=" * 70)
 #     print("\nThis is a simulated workflow using stub agents (no real API calls).")
 #     print("You can chat naturally and make selections to test the workflow.\n")
-    
+
 #     state = workflow.initial_state("interactive-test-thread")
 #     state, _ = workflow.start(state)
-    
+
 #     # Show initial greeting
 #     last_assistant_msg = state.conversation_turns[-1].content
 #     print(f"\n🤖 Assistant: {last_assistant_msg}\n")
-    
+
 #     # Phase 1: Collect preferences through conversation
 #     while state.phase == "collecting":
 #         user_input = input("👤 You: ").strip()
@@ -641,71 +676,71 @@ class TravelPlannerWorkflow:
 #         if user_input.lower() in ["quit", "exit", "q"]:
 #             print("\nExiting interactive test.")
 #             return
-        
+
 #         state, interrupts = workflow.handle_user_message(state, user_input)
-        
+
 #         # Show assistant response
 #         last_turn = state.conversation_turns[-1]
 #         if last_turn.role == "assistant":
 #             print(f"\n🤖 Assistant: {last_turn.content}\n")
-        
+
 #         # Check if we got interrupts (research completed)
 #         if interrupts:
 #             break
-    
+
 #     # Phase 2: Handle attraction selection
 #     if state.phase == "selecting_attractions" and state.research:
 #         print("\n" + "=" * 70)
 #         print("🏛️  ATTRACTION SELECTION")
 #         print("=" * 70)
-        
+
 #         attractions = state.research.attractions
 #         print(f"\nFound {len(attractions)} attractions:\n")
-        
+
 #         for idx, attr in enumerate(attractions):
 #             print(f"  [{idx}] {attr['name']}")
 #             print(f"      📍 {attr.get('address', 'N/A')}")
 #             print(f"      ⭐ {attr.get('rating', 'N/A')} ({attr.get('review_count', 0)} reviews)")
 #             print()
-        
+
 #         while True:
 #             selection = input(f"👤 Select attractions (e.g., '0,1' or '0 1'): ").strip()
 #             if selection.lower() in ["quit", "exit", "q"]:
 #                 print("\nExiting interactive test.")
 #                 return
-            
+
 #             # Parse selection
 #             try:
 #                 if "," in selection:
 #                     indices = [int(x.strip()) for x in selection.split(",") if x.strip()]
 #                 else:
 #                     indices = [int(x.strip()) for x in selection.split() if x.strip()]
-                
+
 #                 state, interrupts = workflow.handle_interrupt(
 #                     state, {"selected_indices": indices}
 #                 )
-                
+
 #                 print(f"\n✅ Selected {len(state.selected_attractions)} attractions:")
 #                 for attr in state.selected_attractions:
 #                     print(f"   • {attr['name']}")
 #                 break
 #             except (ValueError, IndexError) as e:
 #                 print(f"❌ Invalid selection. Please try again (e.g., '0,1')\n")
-    
+
 #     # Phase 3: Handle restaurant selection
 #     if state.phase == "selecting_restaurants" and state.research:
 #         print("\n" + "=" * 70)
 #         print("🍽️  RESTAURANT SELECTION")
 #         print("=" * 70)
-        
+
 #         # Show assistant message
 #         last_turn = state.conversation_turns[-1]
 #         if last_turn.role == "assistant":
 #             print(f"\n🤖 Assistant: {last_turn.content}\n")
-        
+
 #         restaurants = state.research.dining
 #         print(f"\nFound {len(restaurants)} restaurants:\n")
-        
+
 #         for idx, rest in enumerate(restaurants):
 #             print(f"  [{idx}] {rest['name']}")
 #             print(f"      📍 {rest.get('address', 'N/A')}")
@@ -714,48 +749,48 @@ class TravelPlannerWorkflow:
 #             if price:
 #                 print(f"      💰 {'$' * price}")
 #             print()
-        
+
 #         while True:
 #             selection = input(f"👤 Select restaurants (e.g., '0' or '0,1'): ").strip()
 #             if selection.lower() in ["quit", "exit", "q"]:
 #                 print("\nExiting interactive test.")
 #                 return
-            
+
 #             try:
 #                 if "," in selection:
 #                     indices = [int(x.strip()) for x in selection.split(",") if x.strip()]
 #                 else:
 #                     indices = [int(x.strip()) for x in selection.split() if x.strip()]
-                
+
 #                 state, interrupts = workflow.handle_interrupt(
 #                     state, {"selected_indices": indices}
 #                 )
-                
+
 #                 print(f"\n✅ Selected {len(state.selected_restaurants)} restaurants:")
 #                 for rest in state.selected_restaurants:
 #                     print(f"   • {rest['name']}")
 #                 break
 #             except (ValueError, IndexError) as e:
 #                 print(f"❌ Invalid selection. Please try again (e.g., '0')\n")
-    
+
 #     # Phase 4: Show final results
 #     if state.phase == "complete":
 #         print("\n" + "=" * 70)
 #         print("✨ FINAL ITINERARY")
 #         print("=" * 70)
-        
+
 #         # Show assistant message
 #         last_turn = state.conversation_turns[-1]
 #         if last_turn.role == "assistant":
 #             print(f"\n🤖 Assistant: {last_turn.content}\n")
-        
+
 #         # Show preferences
 #         print("📋 Your Preferences:")
 #         prefs = state.preferences.fields
 #         for key, value in prefs.items():
 #             formatted_key = key.replace("_", " ").title()
 #             print(f"   • {formatted_key}: {value}")
-        
+
 #         # Show itinerary
 #         if state.itinerary:
 #             print("\n📅 Itinerary:")
@@ -765,28 +800,28 @@ class TravelPlannerWorkflow:
 #                 print(f"\n   Day {day_num}:")
 #                 for stop in day_info.get("stops", []):
 #                     print(f"      • {stop.get('name', 'Unknown')}")
-        
+
 #         # Show budget
 #         if state.budget:
 #             print(f"\n💰 Budget Estimate:")
 #             budget = state.budget
 #             print(f"   {budget.get('currency', 'USD')} {budget.get('expected', 0):,.2f}")
-        
+
 #         # Show planning context
 #         if state.planning_context:
 #             print(f"\n💬 Planning Context:")
 #             print(f"   {state.planning_context}")
-        
+
 #         print("\n" + "=" * 70)
 #         print("✅ WORKFLOW COMPLETE!")
 #         print("=" * 70)
-        
+
 #         # Show conversation history
 #         print(f"\n📜 Conversation History ({len(state.conversation_turns)} turns):")
 #         for i, turn in enumerate(state.conversation_turns, 1):
 #             role_icon = "🤖" if turn.role == "assistant" else "👤"
 #             print(f"   {i}. {role_icon} {turn.role.title()}: {turn.content[:60]}...")
-        
+
 #         print()
 
 
