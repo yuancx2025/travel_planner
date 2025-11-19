@@ -13,6 +13,7 @@ load_dotenv(dotenv_path)
 amadeus = Client(
     client_id=os.getenv("AMADEUS_API_KEY"),
     client_secret=os.getenv("AMADEUS_API_SECRET"),
+    hostname="production",
 )
 
 

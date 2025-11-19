@@ -12,6 +12,7 @@ load_dotenv(dotenv_path)
 amadeus = Client(
     client_id=os.getenv("AMADEUS_API_KEY"),
     client_secret=os.getenv("AMADEUS_API_SECRET"),
+    hostname="production",
 )
 
 # Common city name → IATA airport code (fast path, no API call)

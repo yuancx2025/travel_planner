@@ -24,13 +24,14 @@ from __future__ import annotations
 import argparse
 import math
 from dataclasses import dataclass
+import os
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from pathlib import Path
 import sys
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -271,9 +272,11 @@ class TravelPlannerWorkflow:
                 "Cuisine Pref": fields.get("cuisine_pref"),
             }
         }
+        folder = "user_profiles"
+        os.makedirs(folder, exist_ok=True)
 
         # Choose filename (thread_id makes it unique)
-        filename = f"user_profile_{thread_id}.json"
+        filename = os.path.join(folder, f"user_profile_{thread_id}.json")
 
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(profile, f, indent=2)
@@ -432,6 +435,25 @@ class TravelPlannerWorkflow:
             "phase": "complete",
         })
 
+        # Save itinerary JSON
+        try:
+            self._save_itinerary(itinerary, state.thread_id)
+        except Exception:
+            pass
+
+        # Validate plan against profile
+        try:
+            profile_fields = dict(state.preferences.fields) if state.preferences else {}
+            issues = self._validate_plan(profile_fields, itinerary, budget_summary)
+            if issues:
+                # add a short assistant turn summarizing the top issues
+                summary = "Validation issues detected: " + "; ".join(issues[:3])
+                turns = state.conversation_turns + [ConversationTurn(role="assistant", content=summary)]
+                state = state.model_copy(update={"conversation_turns": turns})
+        except Exception as e:
+            # don't crash workflow on validation errors
+            print(f"[TravelPlanner] Validation failed: {e}")
+
         return state, []
 
     def _build_selection_interrupt(
@@ -487,6 +509,230 @@ class TravelPlannerWorkflow:
         if isinstance(value, str) and value:
             return value
         return None
+
+    def _save_itinerary(self, itinerary: Dict[str, Any], thread_id: str) -> str:
+        """Save the generated itinerary to a JSON file and return filename."""
+        folder = "generated_plans"
+        os.makedirs(folder, exist_ok=True)
+
+        filename = os.path.join(folder, f"itinerary_{thread_id}.json")
+        try:
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(itinerary or {}, f, indent=2, ensure_ascii=False)
+            print(f"[TravelPlanner] Saved itinerary to: {filename}")
+        except Exception as e:
+            print(f"[TravelPlanner] Failed to save itinerary: {e}")
+        return filename
+
+
+    def _validate_plan(
+        self,
+        profile_fields: Dict[str, Any],
+        itinerary: Optional[Dict[str, Any]],
+        budget_summary: Optional[Dict[str, Any]],
+    ) -> List[str]:
+        """
+        Robust validation checks for contradictions between user profile and generated itinerary.
+        Returns a list of human-readable issue strings (empty list == no issues found).
+        This version normalizes values so .lower() is only called on strings.
+        """
+        issues: List[str] = []
+
+        if not profile_fields:
+            issues.append("No user profile available to validate against.")
+            return issues
+
+        # ---- Helpers ----
+        def normalize_value(v: Any) -> Optional[str]:
+            """Turn common incoming types into a simple string (or None)."""
+            if v is None:
+                return None
+            if isinstance(v, str):
+                return v.strip()
+            if isinstance(v, (int, float)):
+                return str(v)
+            if isinstance(v, list) and v:
+                # take the first item if it's a list
+                first = v[0]
+                if isinstance(first, (str, int, float)):
+                    return str(first).strip()
+                # otherwise try stringify
+                return str(first)
+            # fallback to string representation
+            try:
+                return str(v).strip()
+            except Exception:
+                return None
+
+        def safe_lower(v: Any) -> str:
+            s = normalize_value(v)
+            return s.lower() if isinstance(s, str) else ""
+
+        def parse_date(s: Optional[str]) -> Optional[datetime]:
+            if not s:
+                return None
+            s_norm = normalize_value(s)
+            if not s_norm:
+                return None
+            # try common formats
+            for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ"):
+                try:
+                    return datetime.strptime(s_norm, fmt)
+                except Exception:
+                    continue
+            # try ISO parse fallback
+            try:
+                return datetime.fromisoformat(s_norm)
+            except Exception:
+                # final fallback: try to pull first 10 chars (date part)
+                try:
+                    return datetime.strptime(s_norm[:10], "%Y-%m-%d")
+                except Exception:
+                    return None
+
+        # Normalize profile fields to simple map of strings for repeated access
+        normalized = {k: normalize_value(v) for k, v in profile_fields.items()}
+
+        # --- Check 1: Start date in profile vs itinerary first day ---
+        profile_start = parse_date(
+            normalized.get("start_date") or normalized.get("Start Date")
+        )
+        itinerary_dates: List[datetime] = []
+        if itinerary:
+            days = (
+                itinerary.get("days")
+                or itinerary.get("itinerary")
+                or itinerary.get("schedule")
+                or []
+            )
+            if isinstance(days, dict):
+                # maybe single-day encoded as dict
+                days = [days]
+            for d in days:
+                if isinstance(d, dict):
+                    date_str = normalize_value(
+                        d.get("date") or d.get("day_date") or d.get("day")
+                    )
+                    dt = parse_date(date_str)
+                    if dt:
+                        itinerary_dates.append(dt)
+
+        if profile_start and itinerary_dates:
+            first_itin = min(itinerary_dates)
+            if abs((first_itin.date() - profile_start.date()).days) > 1:
+                issues.append(
+                    f"Profile start date ({profile_start.date()}) does not match itinerary first day ({first_itin.date()})."
+                )
+
+        # --- Check 2: Travel days vs itinerary length ---
+        try:
+            profile_days = int(
+                normalized.get("travel_days") or normalized.get("Travel Days") or 0
+            )
+        except Exception:
+            profile_days = 0
+        if profile_days and itinerary_dates:
+            itin_span_days = (
+                max(itinerary_dates).date() - min(itinerary_dates).date()
+            ).days + 1
+            if profile_days != itin_span_days:
+                issues.append(
+                    f"Profile travel days ({profile_days}) ≠ itinerary span ({itin_span_days})."
+                )
+
+        # --- Check 3: Budget vs estimated cost (if available) ---
+        try:
+            profile_budget = float(
+                normalized.get("budget_usd")
+                or normalized.get("Budget Usd")
+                or normalized.get("budget")
+                or 0
+            )
+        except Exception:
+            profile_budget = 0.0
+        if profile_budget and budget_summary:
+            total = None
+            for k in ("total", "total_cost", "estimated_total", "total_usd", "amount"):
+                if budget_summary.get(k) is not None:
+                    try:
+                        total_val = budget_summary.get(k)
+                        # if it's a list, take first item
+                        if isinstance(total_val, list) and total_val:
+                            total_val = total_val[0]
+                        total = float(total_val)
+                        break
+                    except Exception:
+                        continue
+            if total is not None and total > 0 and profile_budget > 0:
+                if total > profile_budget * 1.05:  # 5% slack
+                    issues.append(
+                        f"Estimated trip cost ({total}) exceeds profile budget ({profile_budget})."
+                    )
+
+        # --- Check 4: Car rental requirement vs itinerary transport modes ---
+        need_car = safe_lower(
+            normalized.get("need_car_rental") or normalized.get("Need Car Rental")
+        )
+        if need_car in ("yes", "true", "1", "y"):
+            transport_used = False
+            if itinerary:
+                try:
+                    raw = json.dumps(itinerary).lower()
+                    if any(
+                        token in raw
+                        for token in (
+                            "car",
+                            "drive",
+                            "rental",
+                            "pickup",
+                            "rent a car",
+                            "rent-car",
+                        )
+                    ):
+                        transport_used = True
+                except Exception:
+                    transport_used = False
+            if not transport_used:
+                issues.append(
+                    "Profile requests a car rental but the itinerary contains no car/drive segments."
+                )
+
+        # --- Check 5: Kids constraints (heuristic) ---
+        kids = safe_lower(normalized.get("kids") or normalized.get("Kids"))
+        if kids in ("yes", "true", "1", "y"):
+            if itinerary:
+                try:
+                    raw = json.dumps(itinerary).lower()
+                    # basic heuristic: if nightlife-related keywords are dominant, flag
+                    if ("nightclub" in raw or "bar" in raw) and not any(
+                        k in raw for k in ("park", "museum", "family", "children", "zoo")
+                    ):
+                        issues.append(
+                            "Profile indicates children but itinerary seems focused on adult nightlife or lacks family-friendly activities."
+                        )
+                except Exception:
+                    pass
+
+        # --- Check 6: Hotel room preference (soft check) ---
+        room_pref = normalize_value(
+            normalized.get("hotel_room_pref") or normalized.get("Hotel Room Pref")
+        )
+        if room_pref and itinerary:
+            try:
+                raw = json.dumps(itinerary).lower()
+                # if certain explicit room types expected (king/queen/twin) but not found: warn
+                if any(
+                    token in room_pref.lower()
+                    for token in ("king", "queen", "twin", "double", "single")
+                ):
+                    if room_pref.lower() not in raw:
+                        issues.append(
+                            f"Hotel room preference '{room_pref}' not mentioned in itinerary lodging details (verify hotel booking)."
+                        )
+            except Exception:
+                pass
+
+        return issues
 
 
 # ----------------------------------------------------------------------
