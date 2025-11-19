@@ -71,7 +71,7 @@ def configure_gemini():
         raise RuntimeError("GOOGLE_API_KEY environment variable is not set.")
     genai.configure(api_key=api_key)
     # You can switch to "gemini-1.5-pro" if you want heavier judging
-    return genai.GenerativeModel("gemini-1.5-flash")
+    return genai.GenerativeModel("gemini-2.0-flash-exp")
 
 
 # ----------------- LLM-as-judge prompt -----------------
@@ -80,89 +80,58 @@ def configure_gemini():
 def build_llm_judge_prompt(
     profile_fields: Dict[str, Any],
     itinerary_json: Dict[str, Any],
-    budget_json: Optional[Dict[str, Any]],
+    budget_json: Optional[
+        Dict[str, Any]
+    ] = None,  # you can drop this param later if you fully remove budget
 ) -> str:
     """
     Build a prompt asking Gemini to judge the plan on high-level / subjective criteria.
-    We explicitly say: ignore low-level consistency checks (dates, budgets, etc.)
-    because those are handled by the rule-based validator.
+    We explicitly say: ignore low-level consistency checks because those are handled by
+    the rule-based validator.
     """
     profile_str = json.dumps(profile_fields, indent=2, ensure_ascii=False)
     itinerary_str = json.dumps(itinerary_json, indent=2, ensure_ascii=False)
-    budget_str = (
-        json.dumps(budget_json, indent=2, ensure_ascii=False) if budget_json else "null"
+
+    prompt = (
+        "You are an expert travel planning evaluator.\n\n"
+        "You are given:\n"
+        "1. A traveler profile (preferences, constraints).\n"
+        "2. A generated travel itinerary.\n\n"
+        "A separate rule-based system already checks things like:\n"
+        "- date alignment\n"
+        "- number of days vs itinerary span\n"
+        "- rough budget vs cost\n"
+        "- simple contradictions such as 'needs car vs no car in itinerary'\n\n"
+        "Your job is to evaluate ONLY higher-level, subjective aspects that are NOT\n"
+        "captured by such simple validation, for example:\n"
+        "- How well the activities match the traveler's stated interests.\n"
+        "- Variety and richness of activities.\n"
+        "- Coherence and logical structure of the days.\n"
+        "- Reasonable pacing.\n"
+        "- Alignment with soft preferences like cuisine and neighborhoods.\n"
+        "- Overall attractiveness and likely user satisfaction.\n\n"
+        "IMPORTANT:\n"
+        "- Ignore low-level issues such as exact date formats or minor budget mismatches.\n"
+        "- Focus on human-level quality and preference fit.\n\n"
+        "You MUST output a single JSON object with the following fields:\n"
+        "- llm_score: number from 0 to 100 (higher is better)\n"
+        "- sub_scores: an object with keys:\n"
+        "    - preference_alignment (0–100)\n"
+        "    - variety_and_richness (0–100)\n"
+        "    - pacing_and_structure (0–100)\n"
+        "    - overall_appeal (0–100)\n"
+        "- strengths: list of 2–5 short sentences\n"
+        "- weaknesses: list of 2–5 short sentences\n"
+        "- comment: a short paragraph (2–4 sentences) summarizing your judgment\n\n"
+        "Do NOT include any extra commentary outside of the JSON.\n\n"
+        "----------------------\n"
+        "TRAVELER PROFILE:\n"
+        f"{profile_str}\n\n"
+        "----------------------\n"
+        "ITINERARY JSON:\n"
+        f"{itinerary_str}\n"
     )
 
-    prompt = f"""
-You are an expert travel planning evaluator.
-
-You are given:
-1. A traveler profile (preferences, constraints).
-2. A generated travel itinerary.
-3. (Optional) A budget summary.
-
-A separate rule-based system already checks:
-- date alignment
-- number of days vs itinerary span
-- rough budget vs cost
-- simple contradictions like "needs car vs no car in itinerary"
-
-Your job is to evaluate ONLY higher-level, subjective aspects that are *not*
-captured by such simple validation, for example:
-
-- How well the activities match the traveler's stated interests (e.g., shopping, food, outdoor, museums).
-- Variety and richness of activities (not all the same kind of thing).
-- Coherence and logical structure of the days (e.g., not jumping randomly all over the city without reason).
-- Reasonable pacing (days are not obviously overloaded or empty from a human perspective).
-- Alignment with soft preferences like cuisine type or neighborhood preferences (when visible in the plan).
-- Overall attractiveness and user satisfaction: “Would this traveler likely enjoy this trip?”
-
-IMPORTANT:
-- Ignore exact date formats, minor timing inconsistencies, and small budget mismatches.
-  Assume those low-level checks are handled elsewhere.
-- Focus on *human-level quality* and preference fit.
-
-Please:
-1. Read the traveler profile.
-2. Read the itinerary (and budget summary if provided).
-3. Provide a *numeric score* from 0 to 100 (higher is better).
-4. Provide sub-scores for:
-   - "preference_alignment" (0-100)
-   - "variety_and_richness" (0-100)
-   - "pacing_and_structure" (0-100)
-   - "overall_appeal" (0-100)
-5. List 2–5 strengths and 2–5 weaknesses of the plan.
-6. Provide a short textual comment (2–4 sentences).
-
-Output MUST be a single JSON object with the following fields:
-
-{
-  "llm_score": <number 0-100>,
-  "sub_scores": {
-    "preference_alignment": <number>,
-    "variety_and_richness": <number>,
-    "pacing_and_structure": <number>,
-    "overall_appeal": <number>
-  },
-  "strengths": [ "sentence 1", "sentence 2", ... ],
-  "weaknesses": [ "sentence 1", "sentence 2", ... ],
-  "comment": "short paragraph summarizing your judgment"
-}
-
-Do NOT include any extra commentary outside of the JSON.
-
-----------------------
-TRAVELER PROFILE:
-{profile_str}
-
-----------------------
-ITINERARY JSON:
-{itinerary_str}
-
-----------------------
-BUDGET JSON (may be null):
-{budget_str}
-"""
     return prompt
 
 

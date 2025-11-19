@@ -26,6 +26,7 @@ import math
 from dataclasses import dataclass
 import os
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 from pathlib import Path
 import sys
@@ -133,6 +134,52 @@ class TravelPlannerWorkflow:
     # ------------------------------------------------------------------
     # Public workflow API
     # ------------------------------------------------------------------
+    def _scrub_sensitive(self, obj):
+        """
+        Recursively remove any sensitive fields or URL parameters
+        (e.g., API keys) before saving structured data such as itineraries
+        or plan JSON. This prevents leakage of secret tokens into output
+        artifacts or version control systems.
+
+        Supports:
+        - dict: removes keys like 'key', 'api_key', 'apikey'
+        - list: recursively scrubs all elements
+        - string: if it is a URL containing '?key=', remove that param
+        - all other types: returned as-is
+
+        This acts as a final sanitization pass before writing files.
+        """
+
+        # Case 1: Dictionary — remove sensitive fields and recurse
+        if isinstance(obj, dict):
+            cleaned = {}
+            for k, v in obj.items():
+                # Remove any field explicitly named like an API key
+                if k.lower() in ("key", "api_key", "apikey"):
+                    continue
+                cleaned[k] = self._scrub_sensitive(v)
+            return cleaned
+
+        # Case 2: List — scrub each element
+        if isinstance(obj, list):
+            return [self._scrub_sensitive(item) for item in obj]
+
+        # Case 3: String — attempt to scrub API key from URLs
+        if isinstance(obj, str) and "key=" in obj:
+            try:
+                # Split URL → remove "key" query parameter → rebuild URL
+                parts = urlsplit(obj)
+                qs = parse_qsl(parts.query, keep_blank_values=True)
+                qs = [(k, v) for (k, v) in qs if k.lower() != "key"]
+                new_query = urlencode(qs)
+                return urlunsplit(parts._replace(query=new_query))
+            except Exception:
+                # Fallback: If parsing fails, return as-is or redact the key
+                return obj  # or: return obj.replace("key=", "key=REDACTED")
+
+        # Case 4: Non-structured type — safe, return as-is
+        return obj
+
     def handle_user_message(
         self, state: TravelPlannerState, message: str
     ) -> Tuple[TravelPlannerState, List[SelectionInterrupt]]:
@@ -517,13 +564,13 @@ class TravelPlannerWorkflow:
 
         filename = os.path.join(folder, f"itinerary_{thread_id}.json")
         try:
+            safe_itinerary = self._scrub_sensitive(itinerary or {})
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(itinerary or {}, f, indent=2, ensure_ascii=False)
             print(f"[TravelPlanner] Saved itinerary to: {filename}")
         except Exception as e:
             print(f"[TravelPlanner] Failed to save itinerary: {e}")
         return filename
-
 
     def _validate_plan(
         self,
