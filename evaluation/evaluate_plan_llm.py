@@ -9,18 +9,28 @@ the existing validation score to get a comprehensive evaluation.
 Usage example:
 
     python evaluation/evaluate_plan_llm.py \
-        --profile user_profile/user_profile_abc123.json \
-        --itinerary itinerary_abc123.json \
-        --budget budget_abc123.json \
+        --profile user_profiles/user_profile_abc123.json \
+        --itinerary generated_plans/itinerary_abc123.json \
         --validation results/validation_result_abc123.json
 """
 
 import argparse
+import glob
 import json
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 import google.generativeai as genai
+
+try:
+    from evaluate_plan import validate_plan, compute_score
+except ImportError:
+    # Fallback if running from a different context
+    import sys
+
+    sys.path.append(os.path.dirname(__file__))
+    from evaluate_plan import validate_plan, compute_score
 
 
 # ----------------- Helpers -----------------
@@ -237,69 +247,57 @@ def save_llm_and_combined_results(
     print(f"💾 Combined evaluation saved to: {combined_path}\n")
 
 
-# ----------------- main() -----------------
+def evaluate_single_case(
+    profile_path: str,
+    itinerary_path: str,
+    budget_path: Optional[str] = None,
+    validation_path: Optional[str] = None,
+):
+    """
+    Run the full evaluation pipeline for a single case.
+    If validation_path is not provided or file missing, run rule-based validation on the fly.
+    """
+    print(f"\nProcessing:\n  Profile: {profile_path}\n  Itinerary: {itinerary_path}")
 
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="LLM-as-judge evaluation for travel plans, and combination with rule-based validation."
+    profile_json = load_json(profile_path)
+    itinerary_json = load_json(itinerary_path)
+    budget_json = (
+        load_json(budget_path) if budget_path and os.path.exists(budget_path) else None
     )
-    parser.add_argument(
-        "--profile", required=True, help="Path to user profile JSON file"
-    )
-    parser.add_argument(
-        "--itinerary", required=True, help="Path to itinerary JSON file"
-    )
-    parser.add_argument(
-        "--budget", required=False, help="Path to budget JSON file (optional)"
-    )
-    parser.add_argument(
-        "--validation",
-        required=False,
-        help="Path to validation_result_<thread_id>.json (optional but recommended)",
-    )
-    args = parser.parse_args()
-
-    profile_json = load_json(args.profile)
-    itinerary_json = load_json(args.itinerary)
-    budget_json = load_json(args.budget) if args.budget else None
-    validation_json = load_json(args.validation) if args.validation else None
 
     profile_fields = extract_profile_fields(profile_json)
-    thread_id = get_thread_id_from_profile(profile_fields, args.profile)
+    thread_id = get_thread_id_from_profile(profile_fields, profile_path)
 
-    print("=== LLM-as-Judge Evaluation ===")
-    print(f"Thread ID: {thread_id}")
-    if validation_json:
-        print(f"Found validation result with score: {validation_json.get('score')}")
+    # 1. Get Validation Result (Load or Compute)
+    validation_json = None
+    if validation_path and os.path.exists(validation_path):
+        print(f"  Loading existing validation: {validation_path}")
+        validation_json = load_json(validation_path)
+    else:
+        print("  Running rule-based validation...")
+        issues = validate_plan(profile_fields, itinerary_json, budget_json)
+        score = compute_score(len(issues))
+        validation_json = {"score": score, "issues": issues, "num_issues": len(issues)}
 
-    # Configure Gemini
-    model = configure_gemini()
+    print(f"  Validation Score: {validation_json.get('score')}")
 
-    # Call LLM-as-judge
-    llm_result = call_llm_judge(model, profile_fields, itinerary_json, budget_json)
+    # 2. Run LLM Judge
+    print("  Running LLM judge...")
+    try:
+        model = configure_gemini()
+        llm_result = call_llm_judge(model, profile_fields, itinerary_json, budget_json)
+    except Exception as e:
+        print(f"❌ LLM Judge failed: {e}")
+        return
 
     llm_score = float(llm_result.get("llm_score", 0.0))
-    validation_score = (
-        float(validation_json.get("score"))
-        if validation_json and validation_json.get("score") is not None
-        else None
-    )
+    validation_score = float(validation_json.get("score", 0.0))
 
-    print("\n=== LLM Result ===")
-    print(json.dumps(llm_result, indent=2, ensure_ascii=False))
+    # 3. Combine Scores
+    combined_score = combine_scores(validation_score, llm_score)
+    print(f"  Combined Score: {combined_score} / 100")
 
-    # Combine scores (if validation score is provided)
-    if validation_score is not None:
-        combined_score = combine_scores(validation_score, llm_score)
-    else:
-        combined_score = round(
-            llm_score, 1
-        )  # fallback: if no validation, just use LLM score
-
-    print(f"\nCombined Score: {combined_score} / 100")
-
-    # Save outputs
+    # 4. Save Results
     save_llm_and_combined_results(
         thread_id=thread_id,
         profile_fields=profile_fields,
@@ -311,5 +309,82 @@ def main():
     )
 
 
-if __name__ == "__main__":
-    main()
+# ----------------- main() -----------------
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="LLM-as-judge evaluation for travel plans. Supports single file or batch mode."
+    )
+
+    # Single file mode arguments
+    parser.add_argument("--profile", help="Path to user profile JSON file")
+    parser.add_argument("--itinerary", help="Path to itinerary JSON file")
+    parser.add_argument("--budget", help="Path to budget JSON file (optional)")
+    parser.add_argument(
+        "--validation", help="Path to validation_result_<thread_id>.json (optional)"
+    )
+
+    # Batch mode argument
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Automatically evaluate all itineraries in generated_plans/",
+    )
+
+    args = parser.parse_args()
+
+    if args.batch:
+        # Batch processing
+        print("=== Batch Evaluation Mode ===")
+        base_dir = os.getcwd()
+        generated_plans_dir = os.path.join(base_dir, "generated_plans")
+        user_profiles_dir = os.path.join(base_dir, "user_profiles")
+        results_dir = os.path.join(base_dir, "results")
+
+        if not os.path.exists(generated_plans_dir):
+            print(f"Error: {generated_plans_dir} does not exist.")
+            return
+
+        itinerary_files = glob.glob(
+            os.path.join(generated_plans_dir, "itinerary_*.json")
+        )
+        print(f"Found {len(itinerary_files)} itinerary files.")
+
+        for itin_path in itinerary_files:
+            filename = os.path.basename(itin_path)
+            # Extract UUID: itinerary_<UUID>.json
+            match = re.match(r"itinerary_(.+)\.json", filename)
+            if not match:
+                print(f"Skipping {filename}: Could not extract UUID.")
+                continue
+
+            uuid = match.group(1)
+            profile_path = os.path.join(user_profiles_dir, f"user_profile_{uuid}.json")
+            validation_path = os.path.join(
+                results_dir, f"validation_result_{uuid}.json"
+            )
+            # Budget is optional and might not follow same naming or exist
+            budget_path = None
+
+            if not os.path.exists(profile_path):
+                print(f"Skipping {uuid}: Profile not found at {profile_path}")
+                continue
+
+            evaluate_single_case(
+                profile_path=profile_path,
+                itinerary_path=itin_path,
+                budget_path=budget_path,
+                validation_path=validation_path,
+            )
+
+    elif args.profile and args.itinerary:
+        # Single file processing
+        evaluate_single_case(
+            profile_path=args.profile,
+            itinerary_path=args.itinerary,
+            budget_path=args.budget,
+            validation_path=args.validation,
+        )
+    else:
+        parser.print_help()

@@ -8,7 +8,7 @@
         "date": [
             "2025-12-01",
             "2025-12-03"
-        ], 
+        ],
         "people_number": 2,
         "local_constraint": {
             "cuisine": [
@@ -18,7 +18,7 @@
             "transportation": "no self-driving"
         },
         "budget": 1400,
-        "query": "Could you create a 3-day travel plan for 2 individuals departing Charlotte to Miami, with a budget of $1400?",
+        "query": "My name is James. Could you create a 3-day travel plan for me and my friend departing Charlotte to Miami, with a budget of $1400? We love Italian food and don't want to drive.",
         "level": "easy"
     },
     {
@@ -40,11 +40,74 @@
             "transportation": "self-driving"
         },
         "budget": 800,
-        "query": "Please design a 2-day trip from Boston to Seattle for 1 person with an $800 budget.",
+        "query": "Hi, I'm Emily. Please design a 2-day trip from Boston to Seattle for just me with an $800 budget. I'll rent a car and I enjoy Chinese and American food.",
         "level": "easy"
     },
     {
         "idx": 2,
+        "org": "Unknown",
+        "dest": "Orlando",
+        "days": 3,
+        "visiting_city_number": 1,
+        "date": [
+            "2025-12-21"
+        ],
+        "people_number": 2,
+        "local_constraint": {
+            "cuisine": [
+                "Asian"
+            ],
+            "transportation": "rent a car",
+            "room type": "1 king bed"
+        },
+        "budget": 3000,
+        "query": "My name is Michael, I will travel to Orlando, Florida. I will travel from 2025-12-21 for three days with my girlfriend. My budget is $3000, no kid. i prefer outdoor activities and I need to rent a car. For hotel, I prefer 1 king bed and we like Asian cuisine.",
+        "level": "medium"
+    },
+    {
+        "idx": 3,
+        "org": "Unknown",
+        "dest": "Miami",
+        "days": 3,
+        "visiting_city_number": 1,
+        "date": [
+            "2025-12-21"
+        ],
+        "people_number": 2,
+        "local_constraint": {
+            "cuisine": [
+                "Asian"
+            ],
+            "transportation": "rent a car",
+            "room type": "1 king bed"
+        },
+        "budget": 3000,
+        "query": "My name is Michael, I will travel to Miami Florida. I will travel from 2025-12-21 for three days with my girlfriend. My budget is $3000, no kid. i prefer outdoor activities and I need to rent a car. For hotel, I prefer 1 king bed and we like Asian cuisine.",
+        "level": "medium"
+    },
+    {
+        "idx": 4,
+        "org": "Unknown",
+        "dest": "NYC",
+        "days": 2,
+        "visiting_city_number": 1,
+        "date": [
+            "2025-12-26"
+        ],
+        "people_number": 1,
+        "local_constraint": {
+            "cuisine": [
+                "Seafood"
+            ],
+            "transportation": "no car",
+            "room type": "1 queen bed"
+        },
+        "budget": 3000,
+        "query": "My name is Tianyi, I will travel to nyc. I will travel from 2025-12-26 myself for 2 days. My budget is $3000, no kid. I prefer indoor activities and I don’t need to rent a car. For the hotel, I prefer 1 queen bed and I like seafood.",
+        "level": "medium"
+    },
+    {
+        "idx": 5,
         "org": "New York",
         "dest": "San Francisco",
         "days": 5,
@@ -52,7 +115,7 @@
         "date": [
             "2026-01-10",
             "2026-01-14"
-        ], 
+        ],
         "people_number": 3,
         "local_constraint": {
             "cuisine": [
@@ -64,7 +127,73 @@
             "transportation": "no self-driving"
         },
         "budget": 3500,
-        "query": "Can you make a 5-day travel itinerary for 3 people going from New York to San Francisco with a $3500 budget?",
+        "query": "My name is Robert. Can you make a 5-day travel itinerary for 3 people going from New York to San Francisco with a $3500 budget? We like Chinese, Italian, and Mexican food and prefer not to drive.",
+        "level": "medium"
+    },
+    {
+        "idx": 6,
+        "org": "Unknown",
+        "dest": "Chicago",
+        "days": 4,
+        "visiting_city_number": 1,
+        "date": [
+            "2025-12-20"
+        ],
+        "people_number": 4,
+        "local_constraint": {
+            "cuisine": [
+                "American",
+                "Pizza"
+            ],
+            "transportation": "rent a car",
+            "room type": "2 queen beds"
+        },
+        "budget": 5000,
+        "query": "My name is Sarah, planning a family trip to Chicago. We are 4 people (2 adults, 2 kids) traveling from 2025-12-20 for 4 days. Budget is $5000. We love museums and deep dish pizza. Need a rental car and a hotel with 2 queen beds.",
+        "level": "medium"
+    },
+    {
+        "idx": 7,
+        "org": "Unknown",
+        "dest": "Las Vegas",
+        "days": 3,
+        "visiting_city_number": 1,
+        "date": [
+            "2025-12-28"
+        ],
+        "people_number": 2,
+        "local_constraint": {
+            "cuisine": [
+                "Steakhouse",
+                "Buffet"
+            ],
+            "transportation": "no car",
+            "room type": "1 king bed"
+        },
+        "budget": 4000,
+        "query": "Hi, I'm David. Taking my wife to Las Vegas for 3 days starting 2025-12-28. Budget $4000. We want to see shows and enjoy fine dining (steakhouses). No car needed, we'll use taxis. Prefer a luxury hotel with a king bed.",
+        "level": "medium"
+    },
+    {
+        "idx": 8,
+        "org": "Unknown",
+        "dest": "San Diego",
+        "days": 5,
+        "visiting_city_number": 1,
+        "date": [
+            "2026-01-05"
+        ],
+        "people_number": 1,
+        "local_constraint": {
+            "cuisine": [
+                "Mexican",
+                "Seafood"
+            ],
+            "transportation": "rent a car",
+            "room type": "1 queen bed"
+        },
+        "budget": 2500,
+        "query": "Solo trip to San Diego! I'm Alex, traveling alone from 2026-01-05 for 5 days. Budget $2500. I want to visit the zoo and beaches. I'll rent a car. Love Mexican food and seafood. Hotel with a queen bed please.",
         "level": "medium"
     }
 ]

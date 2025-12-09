@@ -7,9 +7,8 @@ and compute a numeric score for the plan.
 
 Usage:
     python evaluation/evaluate_plan.py \
-        --profile user_profile/user_profile_abc123.json \
-        --itinerary itinerary_abc123.json \
-        --budget budget_abc123.json   # (optional)
+        --profile user_profiles/user_profile_abc123.json \
+        --itinerary generated_plans/itinerary_abc123.json \
 """
 
 import argparse
