@@ -173,6 +173,7 @@ def validate_plan(
 
     if profile_budget and budget_summary:
         total = None
+        # First, try common flat total keys
         for k in ("total", "total_cost", "estimated_total", "total_usd", "amount"):
             if budget_summary.get(k) is not None:
                 try:
@@ -183,6 +184,16 @@ def validate_plan(
                     break
                 except Exception:
                     continue
+
+        # Fallback for BudgetAgent-style summaries: expected/high/low
+        if total is None:
+            for k in ("expected", "high", "low"):
+                if budget_summary.get(k) is not None:
+                    try:
+                        total = float(budget_summary.get(k))
+                        break
+                    except Exception:
+                        continue
         if total is not None and total > 0 and profile_budget > 0:
             if total > profile_budget * 1.05:  # allow 5% slack
                 issues.append(

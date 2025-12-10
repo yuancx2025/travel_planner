@@ -364,8 +364,8 @@ def main():
             validation_path = os.path.join(
                 results_dir, f"validation_result_{uuid}.json"
             )
-            # Budget is optional and might not follow same naming or exist
-            budget_path = None
+            # Budget file is saved alongside itineraries as budget_<uuid>.json
+            budget_path = os.path.join(generated_plans_dir, f"budget_{uuid}.json")
 
             if not os.path.exists(profile_path):
                 print(f"Skipping {uuid}: Profile not found at {profile_path}")
@@ -388,3 +388,7 @@ def main():
         )
     else:
         parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

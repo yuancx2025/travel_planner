@@ -44,6 +44,7 @@ from agents.itinerary_agent import ItineraryAgent
 
 try:  # pragma: no cover - import guard for smoke test environments
     from agents.research_agent import ResearchAgent
+
     _RESEARCH_IMPORT_ERROR: Optional[Exception] = None
 except Exception as exc:  # pragma: no cover - guard against missing credentials
     ResearchAgent = None  # type: ignore
@@ -108,7 +109,9 @@ class TravelPlannerWorkflow:
 
         return TravelPlannerState(thread_id=thread_id, phase="collecting")
 
-    def start(self, state: TravelPlannerState) -> Tuple[TravelPlannerState, List[SelectionInterrupt]]:
+    def start(
+        self, state: TravelPlannerState
+    ) -> Tuple[TravelPlannerState, List[SelectionInterrupt]]:
         """Kick off the conversation with the user."""
 
         chat_result = self.chat_agent.collect_info("", state.preferences.fields)
@@ -122,12 +125,16 @@ class TravelPlannerWorkflow:
             complete=bool(chat_result.get("complete")),
         )
 
-        new_turns = state.conversation_turns + [ConversationTurn(role="assistant", content=reply)]
+        new_turns = state.conversation_turns + [
+            ConversationTurn(role="assistant", content=reply)
+        ]
 
-        state = state.model_copy(update={
-            "preferences": preferences,
-            "conversation_turns": new_turns,
-        })
+        state = state.model_copy(
+            update={
+                "preferences": preferences,
+                "conversation_turns": new_turns,
+            }
+        )
 
         return state, []
 
@@ -185,7 +192,9 @@ class TravelPlannerWorkflow:
     ) -> Tuple[TravelPlannerState, List[SelectionInterrupt]]:
         """Process a free-form user message."""
 
-        turns = state.conversation_turns + [ConversationTurn(role="user", content=message)]
+        turns = state.conversation_turns + [
+            ConversationTurn(role="user", content=message)
+        ]
 
         chat_result = self.chat_agent.collect_info(message, state.preferences.fields)
         reply = _consume_stream(chat_result.get("stream")) or (
@@ -200,11 +209,13 @@ class TravelPlannerWorkflow:
 
         turns.append(ConversationTurn(role="assistant", content=reply))
 
-        state = state.model_copy(update={
-            "preferences": preferences,
-            "conversation_turns": turns,
-            "phase": "collecting",
-        })
+        state = state.model_copy(
+            update={
+                "preferences": preferences,
+                "conversation_turns": turns,
+                "phase": "collecting",
+            }
+        )
 
         interrupts: List[SelectionInterrupt] = []
         if preferences.complete:
@@ -221,7 +232,9 @@ class TravelPlannerWorkflow:
         if state.phase == "selecting_attractions":
             # Check if user wants to refine research instead of selecting
             if payload.get("action") == "refine":
-                return self._handle_refinement(state, payload.get("refinement_criteria", {}))
+                return self._handle_refinement(
+                    state, payload.get("refinement_criteria", {})
+                )
 
             indices = self._normalize_indices(payload.get("selected_indices"))
             state = self._apply_selection(state, indices, kind="attractions")
@@ -230,7 +243,9 @@ class TravelPlannerWorkflow:
         if state.phase == "selecting_restaurants":
             # Check if user wants to refine research for restaurants
             if payload.get("action") == "refine":
-                return self._handle_refinement(state, payload.get("refinement_criteria", {}))
+                return self._handle_refinement(
+                    state, payload.get("refinement_criteria", {})
+                )
 
             indices = self._normalize_indices(payload.get("selected_indices"))
             state = self._apply_selection(state, indices, kind="restaurants")
@@ -252,19 +267,29 @@ class TravelPlannerWorkflow:
                 f"You've already refined your search {state.research_iteration} times. "
                 "Please make a selection from the current results."
             )
-            turns = state.conversation_turns + [ConversationTurn(role="assistant", content=message)]
+            turns = state.conversation_turns + [
+                ConversationTurn(role="assistant", content=message)
+            ]
             state = state.model_copy(update={"conversation_turns": turns})
 
             # Return current research results for selection
             research = state.research or ResearchState()
             if state.phase == "selecting_attractions":
-                attractions = [item for item in research.attractions if not item.get("error")]
+                attractions = [
+                    item for item in research.attractions if not item.get("error")
+                ]
                 if attractions:
-                    return state, [self._build_selection_interrupt("attractions", attractions)]
+                    return state, [
+                        self._build_selection_interrupt("attractions", attractions)
+                    ]
             elif state.phase == "selecting_restaurants":
-                restaurants = [item for item in research.dining if not item.get("error")]
+                restaurants = [
+                    item for item in research.dining if not item.get("error")
+                ]
                 if restaurants:
-                    return state, [self._build_selection_interrupt("restaurants", restaurants)]
+                    return state, [
+                        self._build_selection_interrupt("restaurants", restaurants)
+                    ]
 
             # Fallback - move to next phase
             return self._after_attractions_selected(state)
@@ -276,9 +301,17 @@ class TravelPlannerWorkflow:
         # Build focus dict for research agent
         focus: Dict[str, List[str]] = {}
         if additional_attractions:
-            focus["attractions"] = additional_attractions if isinstance(additional_attractions, list) else [additional_attractions]
+            focus["attractions"] = (
+                additional_attractions
+                if isinstance(additional_attractions, list)
+                else [additional_attractions]
+            )
         if additional_restaurants:
-            focus["dining"] = additional_restaurants if isinstance(additional_restaurants, list) else [additional_restaurants]
+            focus["dining"] = (
+                additional_restaurants
+                if isinstance(additional_restaurants, list)
+                else [additional_restaurants]
+            )
 
         # Record refinement in history
         refinement_record = {
@@ -288,11 +321,14 @@ class TravelPlannerWorkflow:
         }
 
         # Update state for refinement
-        state = state.model_copy(update={
-            "phase": "refining_research",
-            "research_iteration": state.research_iteration + 1,
-            "research_refinement_history": state.research_refinement_history + [refinement_record],
-        })
+        state = state.model_copy(
+            update={
+                "phase": "refining_research",
+                "research_iteration": state.research_iteration + 1,
+                "research_refinement_history": state.research_refinement_history
+                + [refinement_record],
+            }
+        )
 
         # Re-run research with focus
         return self._run_research(state, focus=focus)
@@ -371,26 +407,32 @@ class TravelPlannerWorkflow:
                 f"Here are updated results (refinement #{state.research_iteration})."
             )
         else:
-            message = (
-                "Great! I've gathered ideas for your trip. Let's pick the attractions you don't want to miss."
-            )
-        turns = state.conversation_turns + [ConversationTurn(role="assistant", content=message)]
+            message = "Great! I've gathered ideas for your trip. Let's pick the attractions you don't want to miss."
+        turns = state.conversation_turns + [
+            ConversationTurn(role="assistant", content=message)
+        ]
 
-        state = state.model_copy(update={
-            "research": research_state,
-            "conversation_turns": turns,
-        })
+        state = state.model_copy(
+            update={
+                "research": research_state,
+                "conversation_turns": turns,
+            }
+        )
 
-        attractions = [item for item in research_state.attractions if not item.get("error")]
+        attractions = [
+            item for item in research_state.attractions if not item.get("error")
+        ]
         if attractions:
             state = state.model_copy(update={"phase": "selecting_attractions"})
             return state, [self._build_selection_interrupt("attractions", attractions)]
 
         # No attractions to choose. Move straight to restaurants / itinerary.
-        state = state.model_copy(update={
-            "selected_attractions": [],
-            "phase": "selecting_restaurants",
-        })
+        state = state.model_copy(
+            update={
+                "selected_attractions": [],
+                "phase": "selecting_restaurants",
+            }
+        )
         return self._after_attractions_selected(state)
 
     def _after_attractions_selected(
@@ -398,7 +440,9 @@ class TravelPlannerWorkflow:
     ) -> Tuple[TravelPlannerState, List[SelectionInterrupt]]:
         restaurants = []
         if state.research:
-            restaurants = [item for item in state.research.dining if not item.get("error")]
+            restaurants = [
+                item for item in state.research.dining if not item.get("error")
+            ]
 
         if restaurants:
             state = state.model_copy(update={"phase": "selecting_restaurants"})
@@ -409,10 +453,12 @@ class TravelPlannerWorkflow:
             state = state.model_copy(update={"conversation_turns": turns})
             return state, [self._build_selection_interrupt("restaurants", restaurants)]
 
-        state = state.model_copy(update={
-            "selected_restaurants": [],
-            "phase": "building_itinerary",
-        })
+        state = state.model_copy(
+            update={
+                "selected_restaurants": [],
+                "phase": "building_itinerary",
+            }
+        )
         return self._finalize_plan(state)
 
     def _apply_selection(
@@ -426,7 +472,9 @@ class TravelPlannerWorkflow:
             if 0 <= idx < len(options):
                 chosen.append(options[idx])
 
-        field = "selected_attractions" if kind == "attractions" else "selected_restaurants"
+        field = (
+            "selected_attractions" if kind == "attractions" else "selected_restaurants"
+        )
         return state.model_copy(update={field: chosen})
 
     def _finalize_plan(
@@ -472,19 +520,30 @@ class TravelPlannerWorkflow:
             budget_summary = None
 
         message = "Here's a draft itinerary based on everything you've shared."
-        turns = state.conversation_turns + [ConversationTurn(role="assistant", content=message)]
+        turns = state.conversation_turns + [
+            ConversationTurn(role="assistant", content=message)
+        ]
 
-        state = state.model_copy(update={
-            "itinerary": itinerary,
-            "planning_context": planning_context,
-            "budget": budget_summary,
-            "conversation_turns": turns,
-            "phase": "complete",
-        })
+        state = state.model_copy(
+            update={
+                "itinerary": itinerary,
+                "planning_context": planning_context,
+                "budget": budget_summary,
+                "conversation_turns": turns,
+                "phase": "complete",
+            }
+        )
 
         # Save itinerary JSON
         try:
             self._save_itinerary(itinerary, state.thread_id)
+        except Exception:
+            pass
+
+        # Save budget JSON (if available)
+        try:
+            if budget_summary:
+                self._save_budget(budget_summary, state.thread_id)
         except Exception:
             pass
 
@@ -495,7 +554,9 @@ class TravelPlannerWorkflow:
             if issues:
                 # add a short assistant turn summarizing the top issues
                 summary = "Validation issues detected: " + "; ".join(issues[:3])
-                turns = state.conversation_turns + [ConversationTurn(role="assistant", content=summary)]
+                turns = state.conversation_turns + [
+                    ConversationTurn(role="assistant", content=summary)
+                ]
                 state = state.model_copy(update={"conversation_turns": turns})
         except Exception as e:
             # don't crash workflow on validation errors
@@ -566,10 +627,25 @@ class TravelPlannerWorkflow:
         try:
             safe_itinerary = self._scrub_sensitive(itinerary or {})
             with open(filename, "w", encoding="utf-8") as f:
-                json.dump(itinerary or {}, f, indent=2, ensure_ascii=False)
+                json.dump(safe_itinerary, f, indent=2, ensure_ascii=False)
             print(f"[TravelPlanner] Saved itinerary to: {filename}")
         except Exception as e:
             print(f"[TravelPlanner] Failed to save itinerary: {e}")
+        return filename
+
+    def _save_budget(self, budget: Dict[str, Any], thread_id: str) -> str:
+        """Save the computed budget summary to a JSON file and return filename."""
+        folder = "generated_plans"
+        os.makedirs(folder, exist_ok=True)
+
+        filename = os.path.join(folder, f"budget_{thread_id}.json")
+        try:
+            safe_budget = self._scrub_sensitive(budget or {})
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(safe_budget, f, indent=2, ensure_ascii=False)
+            print(f"[TravelPlanner] Saved budget to: {filename}")
+        except Exception as e:
+            print(f"[TravelPlanner] Failed to save budget: {e}")
         return filename
 
     def _validate_plan(
@@ -622,7 +698,12 @@ class TravelPlannerWorkflow:
             if not s_norm:
                 return None
             # try common formats
-            for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ"):
+            for fmt in (
+                "%Y-%m-%d",
+                "%Y/%m/%d",
+                "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%dT%H:%M:%SZ",
+            ):
                 try:
                     return datetime.strptime(s_norm, fmt)
                 except Exception:
@@ -752,7 +833,8 @@ class TravelPlannerWorkflow:
                     raw = json.dumps(itinerary).lower()
                     # basic heuristic: if nightlife-related keywords are dominant, flag
                     if ("nightclub" in raw or "bar" in raw) and not any(
-                        k in raw for k in ("park", "museum", "family", "children", "zoo")
+                        k in raw
+                        for k in ("park", "museum", "family", "children", "zoo")
                     ):
                         issues.append(
                             "Profile indicates children but itinerary seems focused on adult nightlife or lacks family-friendly activities."

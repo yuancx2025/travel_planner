@@ -34,7 +34,7 @@ def load_queries(path: str) -> List[Dict[str, Any]]:
 
 
 def save_results(thread_id: str, state: TravelPlannerState):
-    """Save profile and itinerary to disk."""
+    """Save profile, itinerary, and budget (if present) to disk."""
 
     # 1. Save User Profile
     profile_data = state.preferences.fields.copy()
@@ -60,6 +60,15 @@ def save_results(thread_id: str, state: TravelPlannerState):
         print(f"      💾 Saved itinerary to {itinerary_path}")
     else:
         print("      ⚠️  No itinerary generated to save.")
+
+    # 3. Save Budget (if available)
+    if state.budget:
+        budget_path = os.path.join(ROOT, "generated_plans", f"budget_{thread_id}.json")
+        os.makedirs(os.path.dirname(budget_path), exist_ok=True)
+
+        with open(budget_path, "w", encoding="utf-8") as f:
+            json.dump(state.budget, f, indent=2, ensure_ascii=False)
+        print(f"      💾 Saved budget to {budget_path}")
 
 
 def run_single_query(query_obj: Dict[str, Any]):
