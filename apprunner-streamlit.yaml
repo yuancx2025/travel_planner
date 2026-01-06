@@ -1,0 +1,16 @@
+version: 1.0
+runtime: docker
+build:
+  commands:
+    build:
+      - echo "Building Streamlit service..."
+      - docker build -f Dockerfile.streamlit -t travel-planner-streamlit:latest .
+run:
+  command: streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false
+  network:
+    port: 8501
+    env: PORT
+  env:
+    - name: PORT
+      value: "8501"
+
