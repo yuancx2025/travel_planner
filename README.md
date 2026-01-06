@@ -52,7 +52,7 @@ graph TB
     end
     
     User -->|HTTP requests| Streamlit
-    Streamlit -->|POST /sessions/{id}/turns| API
+    Streamlit -->|POST /sessions/id/turns| API
     API --> Runtime
     Runtime -->|Save/Load state| Redis
     Runtime --> State
@@ -294,90 +294,8 @@ pytest -v
 pytest -v
 ```
 
-### 6. Test Individual Tools (Python REPL)
-```python
-# Weather
-from tools.weather import get_weather
-weather = get_weather("Paris", "2024-12-25", 3)
-
-# Attractions
-from tools.attractions import search_attractions
-places = search_attractions("Tokyo", keyword="temple", limit=5)
-
-# Dining
-from tools.dining import search_restaurants
-food = search_restaurants(35.6762, 139.6503, radius=2000, keyword="ramen")
-
-# Hotels
-from tools.hotels import search_hotels_by_city
-hotels = search_hotels_by_city("LON", "2024-12-20", "2024-12-23")
-
-# Fuel Prices & Car Rental Rates (combined Gemini query)
-from tools.car_price import get_car_and_fuel_prices
-prices = get_car_and_fuel_prices("California")
-# Returns: {location, state, regular, midgrade, premium, diesel, 
-#           economy_car_daily, compact_car_daily, midsize_car_daily, suv_daily, ...}
-
-# Legacy fuel-only function (backward compatible)
-from tools.car_price import get_fuel_prices
-fuel_only = get_fuel_prices("California")  # Filters out car rental data
-
-# Distance Matrix
-from tools.distance_matrix import get_distance_matrix
-distances = get_distance_matrix(
-    ["51.5074,-0.1278"], ["48.8566,2.3522"], mode="DRIVE"
-)
-```
-
-### 7. Test ResearchAgent
-```python
-from agents.research_agent import ResearchAgent
-
-agent = ResearchAgent()
-state = {
-    "destination_city": "Barcelona",
-    "start_date": "2024-12-20",
-    "travel_days": 4,
-    "travelers": 2,
-    "cuisine_pref": "tapas",
-    "need_car_rental": "yes",
-    "currency": "EUR",
-    "temp_unit": "celsius"
-}
-
-results = agent.research(state)
-# Returns: {weather, attractions, dining, hotels, car_rentals, fuel_prices, distances}
-```
-
----
 
 ## 📦 Deployment to AWS App Runner
-
-### Quick Deploy
-
-```bash
-# Setup AWS resources (ECR, Secrets Manager)
-./setup-aws.sh
-
-# Build and push Docker images
-./deploy.sh
-
-# Create App Runner services (see DEPLOYMENT.md for details)
-```
-
-### Architecture
-
-- **Two App Runner services**: FastAPI backend (8000) + Streamlit frontend (8501)
-- **ECR**: Container image storage
-- **Redis**: ElastiCache Serverless or external managed Redis (Upstash/Redis Cloud)
-- **Secrets Manager**: Secure API key storage
-- **CloudWatch**: Logs and monitoring
-
-**Why two services?**
-- Independent scaling and deployment
-- Clear separation of concerns (API vs UI)
-- Easier debugging and cost optimization
-
 See [DEPLOYMENT.md](DEPLOYMENT.md) for complete step-by-step instructions.
 
 ---
@@ -423,69 +341,6 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for complete step-by-step instructions.
 - `TRAVEL_PLANNER_API_URL` - FastAPI service URL (for Streamlit)
 
 All configuration centralized in [`config.py`](config.py).
-
----
-
-## 📋 Tool Signatures
-
-### Weather
-```python
-get_weather(city: str, start_date: str, duration: int, units: str = "fahrenheit")
-→ List[Dict]  # [{date, temp_max, temp_min, precip, conditions}, ...]
-```
-
-### Attractions
-```python
-search_attractions(city: str, keyword: str = "", limit: int = 10)
-→ List[Dict]  # [{name, address, coord, rating, category}, ...]
-```
-
-### Dining
-```python
-search_restaurants(lat: float, lng: float, radius: int, keyword: str = "")
-→ List[Dict]  # [{name, address, coord, rating, price_level}, ...]
-```
-
-### Hotels
-```python
-search_hotels_by_city(city_name: str, checkin_date: str, checkout_date: str, 
-                      adults: int = 2, currency: str = "USD", limit: int = 5)
-→ List[Dict]  # [{name, address, price, currency, rating}, ...]
-```
-
-### Fuel Prices & Car Rental Rates (Combined)
-```python
-# New combined function (recommended)
-get_car_and_fuel_prices(location: str)  # US state or city
-→ Dict  # {location, state, regular, midgrade, premium, diesel,
-        #  economy_car_daily, compact_car_daily, midsize_car_daily, suv_daily,
-        #  currency, fuel_unit, rental_unit, source, last_updated}
-
-# Legacy fuel-only function (backward compatible)
-get_fuel_prices(location: str)  # Filters out car rental data
-→ Dict  # {location, state, regular, midgrade, premium, diesel, ...}
-```
-
-### Distance Matrix
-```python
-get_distance_matrix(origins: List[str], destinations: List[str], mode: str = "DRIVE")
-→ List[Dict]  # [{origin, destination, distance_km, duration_min}, ...]
-```
-
-## 🧪 End-to-End Flow
-
-1. A user message submitted in Streamlit is POSTed to `/sessions/{id}/turns`.
-2. `TravelPlannerRuntime` pushes the turn into the `travel_graph` state machine and waits for interrupts (human approval) or agent completions.
-3. Research tasks fan out to the tool layer with retry/backoff, normalizing results into `weather`, `attractions`, `dining`, `hotels`, `car_rentals`, `fuel_prices`, and `distances` keys.
-4. The itinerary and budget agents enrich the shared state, and final responses are rendered back through the chat UI.
-
-When deploying to Cloud Run, set environment variables (`ENV`, `PORT`, `GOOGLE_PROJECT_ID`, `GOOGLE_LOCATION`, `GOOGLE_GENAI_MODEL`, `DATABASE_URL`, plus API keys) and configure CORS origins via `CORS_ORIGINS` to avoid wildcards in production.
-
-## 🔑 API Key Quick Links
-
-- **Google Maps**: https://console.cloud.google.com/apis/credentials
-- **Gemini**: https://aistudio.google.com/app/apikey
-- **Amadeus**: https://developers.amadeus.com/get-started/get-started-with-self-service-apis
 
 ---
 
@@ -545,54 +400,8 @@ travel_planner-main/
 - **AWS App Runner** - Serverless container deployment
 
 ---
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests (`pytest -v`)
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
-
----
-
 ## 📄 License
 
 See [LICENSE](LICENSE) file for details.
 
 ---
-
-## 🐛 Troubleshooting
-
-### Redis Connection Issues
-```bash
-# Check if Redis is running
-docker ps | grep redis
-
-# Test connection
-redis-cli ping  # Should return PONG
-```
-
-### Session Not Persisting
-- Ensure `REDIS_URL` is set before starting FastAPI
-- Check FastAPI logs for "Connected to Redis for session storage"
-- Verify session_id appears in browser URL
-
-### API Key Errors
-```bash
-# Validate keys are loaded
-python -c "import config; print(config.get_google_api_key())"
-```
-
-### Timeout Errors in Streamlit
-- Increased timeout to 180s in latest version
-- Research phase may take 30-60s for parallel tool calls
-- Check network connectivity to external APIs
-
-For detailed deployment troubleshooting, see [DEPLOYMENT.md](DEPLOYMENT.md).
-
----
-
-**Built with ❤️ using AI agents**
