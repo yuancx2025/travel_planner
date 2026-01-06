@@ -14,7 +14,7 @@ API_BASE_URL = config.TRAVEL_PLANNER_API_URL
 
 @st.cache_resource
 def get_http_client() -> httpx.Client:
-    return httpx.Client(base_url=API_BASE_URL, timeout=30.0)
+    return httpx.Client(base_url=API_BASE_URL, timeout=180.0)
 
 
 def _update_session(data: Dict[str, Any]) -> None:
@@ -300,13 +300,20 @@ def main() -> None:
     st.set_page_config(page_title="Travel Planner Companion", page_icon="🧭", layout="wide")
     st.title("🧭 Travel Planner Companion")
 
+    # Get session_id from URL query params (preserves across refresh)
+    query_params = st.query_params
+    url_session_id = query_params.get("session_id")
+    
     st.session_state.setdefault("state", {})
     st.session_state.setdefault("interrupts", [])
-    st.session_state.setdefault("session_id", None)
+    st.session_state.setdefault("session_id", url_session_id)
 
     client = get_http_client()
     try:
         _ensure_session(client)
+        # Update URL with session_id so it persists across refresh
+        if st.session_state.get("session_id") and not url_session_id:
+            st.query_params["session_id"] = st.session_state["session_id"]
     except httpx.HTTPError as exc:  # pragma: no cover - network failure feedback
         st.error(f"Unable to connect to the planner API: {exc}")
         return
