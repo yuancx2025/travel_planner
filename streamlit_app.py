@@ -38,8 +38,25 @@ def _create_session(client: httpx.Client) -> None:
     _update_session(data)
 
 
+def _fetch_session(client: httpx.Client, session_id: str) -> None:
+    """Fetch an existing session from the backend."""
+    response = client.get(f"/sessions/{session_id}")
+    if response.status_code == 404:
+        # Session not found, create a new one
+        _create_session(client)
+        return
+    response.raise_for_status()
+    data = response.json()
+    st.session_state["session_id"] = data["session_id"]
+    _update_session(data)
+
+
 def _ensure_session(client: httpx.Client) -> None:
-    if st.session_state.get("session_id"):
+    session_id = st.session_state.get("session_id")
+    if session_id:
+        # If we have a session_id but no state, fetch from backend
+        if not st.session_state.get("state") or not st.session_state["state"].get("conversation_turns"):
+            _fetch_session(client, session_id)
         return
     _create_session(client)
 
