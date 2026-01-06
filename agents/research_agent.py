@@ -19,7 +19,7 @@ from tools.car_price import get_car_and_fuel_prices
 from tools.dining import search_restaurants
 from tools.distance_matrix import get_distance_matrix
 from tools.flight import search_flights
-from tools.hotels import CITY_TO_IATA, search_hotels_by_city
+from tools.hotels import search_hotels_by_city
 from tools.weather import get_weather
 from workflows.schemas import (
     ResearchOutput,
@@ -724,21 +724,19 @@ class ResearchAgent:
         try:
             origin = state.get("home_airport") or state.get("origin_airport")
             if isinstance(origin, str):
-                origin = origin.strip().upper()
-
+                origin = origin.strip()
+            
+            # If no airport code, use origin city name (Google Search can handle city names)
             if not origin:
-                origin_city = state.get("origin_city")
-                if origin_city:
-                    origin = CITY_TO_IATA.get(origin_city.strip().lower())
+                origin = state.get("origin_city", "").strip()
 
             destination = state.get("destination_airport")
             if isinstance(destination, str):
-                destination = destination.strip().upper()
-
+                destination = destination.strip()
+            
+            # If no airport code, use destination city name (Google Search can handle city names)
             if not destination:
-                dest_city = state.get("destination_city")
-                if dest_city:
-                    destination = CITY_TO_IATA.get(dest_city.strip().lower())
+                destination = state.get("destination_city", "").strip()
 
             if not origin or not destination:
                 return []

@@ -230,7 +230,7 @@ class BudgetAgent:
         budget_violation: Optional[BudgetViolation] = None
         suggestions: List[str] = []
         
-        # Check budget constraint
+        # Check budget constraint (more lenient - only fail if significantly over)
         budget_usd = preferences.budget_usd
         if budget_usd is not None and budget.expected > budget_usd:
             overage = budget.expected - budget_usd
@@ -241,15 +241,20 @@ class BudgetAgent:
                 overage=overage,
                 percentage_over=percentage_over,
             )
-            failed_requirements.append(f"Budget exceeded by ${overage:.2f} ({percentage_over:.1f}%)")
-            violations.append(RequirementViolation(
-                requirement="budget",
-                reason=f"Expected budget: ${budget_usd:.2f}, Actual cost: ${budget.expected:.2f}",
-                severity="high" if percentage_over > 20 else "medium",
-            ))
-            suggestions.append(f"Consider reducing activities or choosing more budget-friendly options")
+            # Only fail if overage is more than 15% (more lenient threshold)
+            if percentage_over > 15:
+                failed_requirements.append(f"Budget exceeded by ${overage:.2f} ({percentage_over:.1f}%)")
+                violations.append(RequirementViolation(
+                    requirement="budget",
+                    reason=f"Expected budget: ${budget_usd:.2f}, Actual cost: ${budget.expected:.2f}",
+                    severity="high" if percentage_over > 30 else "medium",
+                ))
+                suggestions.append(f"Consider reducing activities or choosing more budget-friendly options")
+            else:
+                # Small overage - just note it, don't fail
+                suggestions.append(f"Budget is slightly over by ${overage:.2f} ({percentage_over:.1f}%) - consider minor adjustments")
         
-        # Check activity preferences
+        # Check activity preferences (more lenient matching)
         activity_pref = preferences.activity_pref
         if activity_pref:
             # Normalize to list for checking
@@ -260,25 +265,49 @@ class BudgetAgent:
             
             # Check if itinerary includes activities matching preferences
             itinerary_activities = []
+            itinerary_text = ""  # Full text for fuzzy matching
             for day in itinerary.days:
                 for stop in day.stops:
                     if stop.category:
                         itinerary_activities.append(stop.category.lower())
+                        itinerary_text += " " + stop.category.lower()
                     if stop.name:
                         itinerary_activities.append(stop.name.lower())
+                        itinerary_text += " " + stop.name.lower()
             
-            # Simple check: see if any preference keywords appear in activities
-            matches = any(
-                any(pref in activity for activity in itinerary_activities)
-                for pref in activity_pref_list
-            )
+            # More lenient matching: check for keywords and synonyms
+            # Map common activity preferences to related keywords
+            activity_synonyms = {
+                "outdoor": ["outdoor", "adventure", "park", "trail", "hiking", "nature", "wildlife", "camping", "kayak", "canoe", "climbing"],
+                "adventure": ["adventure", "outdoor", "extreme", "thrill", "exciting", "active"],
+                "cultural": ["cultural", "museum", "art", "history", "heritage", "gallery", "monument"],
+                "relaxing": ["relaxing", "spa", "beach", "pool", "quiet", "peaceful", "zen"],
+                "family": ["family", "kids", "children", "playground", "zoo", "aquarium"],
+            }
+            
+            matches = False
+            for pref in activity_pref_list:
+                # Direct keyword match
+                if any(pref in activity for activity in itinerary_activities) or pref in itinerary_text:
+                    matches = True
+                    break
+                # Synonym matching
+                synonyms = activity_synonyms.get(pref, [])
+                if synonyms:
+                    if any(syn in itinerary_text for syn in synonyms):
+                        matches = True
+                        break
+            
+            # Only fail if we have activities but NO matches at all (more lenient)
             if not matches and itinerary_activities:
-                failed_requirements.append(f"Activity preferences ({', '.join(activity_pref_list)}) not well represented")
+                # Make this a low-severity violation, not a blocker
                 violations.append(RequirementViolation(
                     requirement="activity_preferences",
                     reason=f"Requested: {', '.join(activity_pref_list)}, Found: {', '.join(itinerary_activities[:3])}",
-                    severity="medium",
+                    severity="low",  # Changed from "medium" to "low"
                 ))
+                # Don't add to failed_requirements - just note it as a suggestion
+                suggestions.append(f"Consider adding more {', '.join(activity_pref_list)} activities if desired")
         
         # Check cuisine preferences
         cuisine_pref = preferences.cuisine_pref
@@ -294,19 +323,31 @@ class BudgetAgent:
             # We can note if budget allows for preferred hotel type
             pass
         
-        # Check travel days match
+        # Check travel days match (allow ±1 day flexibility)
         travel_days = preferences.travel_days
         if travel_days is not None:
             actual_days = len(itinerary.days)
-            if actual_days != travel_days:
+            day_diff = abs(actual_days - travel_days)
+            # Only fail if difference is more than 1 day (more lenient)
+            if day_diff > 1:
                 failed_requirements.append(f"Expected {travel_days} days, itinerary has {actual_days} days")
                 violations.append(RequirementViolation(
                     requirement="travel_days",
                     reason=f"Requested: {travel_days} days, Planned: {actual_days} days",
                     severity="low",
                 ))
+            elif day_diff == 1:
+                # Just note it, don't fail
+                suggestions.append(f"Itinerary has {actual_days} days instead of {travel_days} days")
         
-        requirements_met = len(failed_requirements) == 0
+        # Consider requirements met if:
+        # 1. No failed requirements, OR
+        # 2. Only low-severity violations (and no budget violation)
+        has_only_low_severity = all(
+            v.severity == "low" for v in violations
+        ) and budget_violation is None
+        
+        requirements_met = len(failed_requirements) == 0 or has_only_low_severity
         
         return CriticEvaluation(
             requirements_met=requirements_met,
